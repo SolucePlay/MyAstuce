@@ -1,0 +1,120 @@
+/* Suppression des marges et gestion de la hauteur dynamique (dvh) pour les mobiles */
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%; /* Secours pour les vieux navigateurs */
+    height: 100dvh; /* S'adapte parfaitement même quand la barre d'adresse mobile apparaît/disparaît */
+    width: 100%;
+    font-family: 'Inter', sans-serif;
+    background-color: #e2e8f0;
+    overflow: hidden; /* Empêche l'écran de "bouger" quand on glisse le doigt */
+}
+
+#map {
+    height: 100%;
+    width: 100%;
+    z-index: 1;
+}
+
+/* Le panneau de contrôle (Mode PC / Tablette par défaut) */
+.panneau-flottant {
+    position: absolute;
+    top: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 15px;
+    
+    /* Empêche le panneau de coller aux bords sur un petit écran */
+    width: max-content;
+    max-width: 90%; 
+    
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    
+    padding: 10px 20px;
+    border-radius: 50px;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+}
+
+#heure-maj {
+    font-size: 14px;
+    font-weight: 600;
+    color: #334155;
+    white-space: nowrap; /* Empêche le texte de passer sur deux lignes */
+}
+
+#filtre-ligne {
+    padding: 8px 16px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: #0f172a;
+    background-color: white;
+    border: 1px solid #cbd5e1;
+    border-radius: 20px;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+#filtre-ligne:hover, #filtre-ligne:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+/* Émoji bus avec une belle ombre */
+.bus-icon {
+    font-size: 26px;
+    text-align: center;
+    line-height: 30px;
+    filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.4));
+}
+
+/* Bulles Leaflet (Popups) */
+.leaflet-popup-content-wrapper {
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+}
+
+.leaflet-popup-content {
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #334155;
+    margin: 15px;
+}
+
+.leaflet-popup-content b {
+    color: #0f172a;
+}
+
+/* === LA MAGIE DU RESPONSIVE (TÉLÉPHONES) === */
+/* Ce code s'active uniquement si l'écran fait moins de 600 pixels de large */
+@media (max-width: 600px) {
+    .panneau-flottant {
+        flex-direction: column; /* On empile les éléments au lieu de les aligner */
+        gap: 10px;
+        padding: 12px;
+        border-radius: 20px; /* Moins rond quand c'est empilé */
+        top: 10px;
+        width: 85%;
+    }
+
+    #heure-maj {
+        font-size: 12px;
+    }
+
+    #filtre-ligne {
+        width: 100%; /* Le bouton prend toute la largeur disponible */
+        font-size: 16px; /* Un texte plus gros évite à iOS de zoomer de force quand on clique */
+        text-align: center;
+        padding: 10px;
+    }
+}
