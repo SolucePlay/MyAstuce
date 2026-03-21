@@ -1,4 +1,3 @@
-// Initialisation de la carte
 const map = L.map('map').setView([49.4431, 1.0993], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
 const busMarkers = L.layerGroup().addTo(map);
@@ -11,7 +10,7 @@ const busIcon = L.divIcon({
     popupAnchor: [0, -15]
 });
 
-let ligneTracee = null; // Cette variable va garder en mémoire le trait dessiné sur la carte
+let ligneTracee = null;
 
 const tracesLignes = {
     "TAE:A": [
@@ -500,34 +499,32 @@ const tracesLignes = {
 
 
 // === LE DICTIONNAIRE DE TRADUCTION ===
-// Tu peux ajouter ou modifier les lignes ici !
-// === LE DICTIONNAIRE DE TRADUCTION OFFICIEL ===
 const nomsLignes = {
     // Le Métro et les TEOR
-    "TCAR:90": "Métro", // 
-    "TCAR:91": "T1",    // 
-    "TCAR:92": "T2",    // 
-    "TCAR:93": "T3",    // 
-    "TCAR:94": "T4",    // 
-    "TCAR:95": "T5",    // 
+    "TCAR:90": "Métro",
+    "TCAR:91": "T1",
+    "TCAR:92": "T2",
+    "TCAR:93": "T3",
+    "TCAR:94": "T4",
+    "TCAR:95": "T5",
 
     // Les lignes FAST
-    "TCAR:01": "F1",    // 
-    "TCAR:02": "F2",    // 
-    "TCAR:03": "F3",    // 
-    "TCAR:04": "F4",    // 
-    "TCAR:05": "F5",    // 
-    "TCAR:06": "F6",    // 
-    "TCAR:07": "F7",    // 
-    "TCAR:08": "F8",    // 
+    "TCAR:01": "F1",
+    "TCAR:02": "F2",
+    "TCAR:03": "F3",
+    "TCAR:04": "F4",
+    "TCAR:05": "F5",
+    "TCAR:06": "F6",
+    "TCAR:07": "F7",
+    "TCAR:08": "F8",
 
     // Les lignes de bus majeures
-    "TCAR:10": "10",    // 
-    "TCAR:11": "11",    // 
-    "TCAR:13": "13",    // 
-    "TCAR:14": "14",    // 
-    "TCAR:15": "15",    // 
-    "TCAR:20": "20",    // 
+    "TCAR:10": "10",
+    "TCAR:11": "11",
+    "TCAR:13": "13",
+    "TCAR:14": "14",
+    "TCAR:15": "15",
+    "TCAR:20": "20",
     "TCAR:22": "22",    // [cite: 2]
     "TCAR:27": "27",    // [cite: 3]
     "TCAR:28": "28",    // [cite: 3]
@@ -539,11 +536,11 @@ const nomsLignes = {
     "TCAR:41": "41",    // [cite: 6]
     "TCAR:42": "42",    // [cite: 6]
     "TCAR:43": "43",    // [cite: 6]
-    "TCAR:44": "44",    // 
+    "TCAR:44": "44",
 
     // Lignes spéciales
-    "TCAR:98": "Noctambus", // 
-    "TCAR:99": "Calypso"    // 
+    "TCAR:98": "Noctambus",
+    "TCAR:99": "Calypso"
 };
 
 // === LE DICTIONNAIRE DES COULEURS (AJOUT) ===
@@ -584,8 +581,6 @@ let lignesConnues = new Set();
 const selectFiltre = document.getElementById('filtre-ligne');
 let ligneSelectionnee = 'Toutes';
 
-// === NOUVEAU CODE : ON PRÉ-REMPLIT LE MENU ===
-// On ajoute immédiatement toutes les lignes de notre dictionnaire dans le menu !
 for (const [codeTcar, vraiNom] of Object.entries(nomsLignes)) {
     lignesConnues.add(codeTcar);
     const option = document.createElement('option');
@@ -594,7 +589,6 @@ for (const [codeTcar, vraiNom] of Object.entries(nomsLignes)) {
     selectFiltre.appendChild(option);
 }
 
-// L'écouteur d'événement (ne change pas)
 selectFiltre.addEventListener('change', (e) => {
     ligneSelectionnee = e.target.value;
     dessinerTraceLigne(ligneSelectionnee);
@@ -602,29 +596,23 @@ selectFiltre.addEventListener('change', (e) => {
 });
 
 function dessinerTraceLigne(routeId) {
-    // A. On efface l'ancien trait s'il y en a déjà un
     if (ligneTracee) {
         map.removeLayer(ligneTracee);
     }
 
-    // B. Si on a cliqué sur "Toutes les lignes", on s'arrête (on ne dessine rien)
     if (routeId === 'Toutes') return;
 
-    // C. On cherche si on possède les points GPS de cette ligne
     const coordonnees = tracesLignes[routeId];
 
     if (coordonnees && coordonnees.length > 0) {
-        // On récupère la bonne couleur depuis ton dictionnaire existant
         const couleur = infosLignes[routeId] ? infosLignes[routeId].couleur : '#3b82f6';
 
-        // D. On dessine la ligne !
         ligneTracee = L.polyline(coordonnees, {
             color: couleur,
-            weight: 5,       // Épaisseur du trait
-            opacity: 0.7     // Légèrement transparent pour voir les rues en dessous
+            weight: 5,
+            opacity: 0.7
         }).addTo(map);
 
-        // Bonus génial : On demande à la carte de se recentrer et de zoomer automatiquement pour voir toute la ligne d'un coup !
         map.fitBounds(ligneTracee.getBounds());
     }
 }
@@ -663,31 +651,25 @@ function chargerPositionsBus() {
                             ? entite.vehicle.vehicle.label
                             : "Destination inconnue";
 
-                        // === NOUVEAU : On récupère et on traduit l'affluence ===
-                        let texteAffluence = ""; // Par défaut, on n'affiche rien
+                        let texteAffluence = "";
                         if (entite.vehicle.occupancyStatus) {
-                            // On traduit, ou on met "Inconnue" si le mot n'est pas dans notre dictionnaire
                             const traduction = traductionsAffluence[entite.vehicle.occupancyStatus] || "Inconnue";
                             texteAffluence = `<br>Affluence : <b>${traduction}</b>`;
                         }
 
-                        // === TRADUCTION DU NOM DE LA LIGNE ===
                         let nomAffiche = nomsLignes[rawRouteId];
-                        // Si on ne l'a pas dans le dictionnaire, on nettoie au moins le "TCAR:" (ex: "TCAR:27" devient "27")
                         if (!nomAffiche) {
                             nomAffiche = rawRouteId.replace("TCAR:", "").replace("TNI:", "").replace("TAE:", "");
                         }
 
-                        // Ajout automatique au menu déroulant
                         if (rawRouteId !== "Inconnue" && !lignesConnues.has(rawRouteId)) {
                             lignesConnues.add(rawRouteId);
                             const option = document.createElement('option');
                             option.value = rawRouteId;
-                            option.textContent = 'Ligne ' + nomAffiche; // Utilise le beau nom
+                            option.textContent = 'Ligne ' + nomAffiche;
                             selectFiltre.appendChild(option);
                         }
 
-                        // Filtre (on utilise toujours l'identifiant caché "rawRouteId" pour comparer)
                         if (ligneSelectionnee !== 'Toutes' && ligneSelectionnee !== rawRouteId) return;
 
                         let infoTemps = "<i>Pas d'info temps réel</i>";
