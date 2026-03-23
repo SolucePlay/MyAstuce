@@ -209,10 +209,40 @@ function chargerPositionsBus() {
 
                     idBusActifs.add(idBus);
 
-                    // Infos Popup
+                    // 1. Infos de base (Ligne et Destination)
                     const destination = (entite.vehicle.vehicle && entite.vehicle.vehicle.label) ? entite.vehicle.vehicle.label : "Destination inconnue";
                     const infoLigne = infosLignes[rawRouteId] || { nom: rawRouteId.replace("TCAR:", ""), couleur: "#555" };
-                    const textePopup = `<b>Ligne ${infoLigne.nom}</b><br>Direction : ${destination}`;
+
+                    // 2. LE RETARD ET L'AVANCE (Le retour !)
+                    let infoTemps = "<i>Pas d'info temps réel</i>";
+                    if (tripId && tripUpdates.has(tripId)) {
+                        const update = tripUpdates.get(tripId);
+                        if (update.stopTimeUpdate && update.stopTimeUpdate.length > 0) {
+                            const delay = update.stopTimeUpdate[0].departure?.delay || 0;
+                            const retMin = Math.round(delay / 60);
+                            if (retMin > 0) infoTemps = `<span style="color:red">En retard de ${retMin} min</span>`;
+                            else if (retMin < 0) infoTemps = `<span style="color:green">En avance de ${Math.abs(retMin)} min</span>`;
+                            else infoTemps = `<span style="color:green">À l'heure exacte</span>`;
+                        }
+                    }
+
+                    // 3. L'AFFLUENCE ET LES PLACES (Le retour !)
+                    let texteAffluence = "";
+                    if (entite.vehicle.occupancyStatus) {
+                        const dicoAffluence = {
+                            "EMPTY": "Vide",
+                            "MANY_SEATS_AVAILABLE": "Beaucoup de places",
+                            "FEW_SEATS_AVAILABLE": "Peu de places",
+                            "STANDING_ROOM_ONLY": "Places debout",
+                            "CRUSHED_STANDING_ROOM_ONLY": "Très bondé",
+                            "FULL": "Complet",
+                            "NOT_ACCEPTING_PASSENGERS": "Ne prend plus de passagers"
+                        };
+                        texteAffluence = `<br>Affluence : <b>${dicoAffluence[entite.vehicle.occupancyStatus] || "Inconnue"}</b>`;
+                    }
+
+                    // 4. On rassemble toutes les infos dans la belle bulle
+                    const textePopup = `<b>Ligne ${infoLigne.nom}</b><br>Direction : ${destination}<br>État : ${infoTemps}${texteAffluence}`;
 
                     // --- GESTION DU MARQUEUR ---
                     if (marqueursBus[idBus]) {
