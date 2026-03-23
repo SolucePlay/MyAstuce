@@ -170,95 +170,100 @@ function chargerPositionsBus() {
         fetch(urlPositions).then(res => res.json()),
         fetch(urlTemps).then(res => res.json())
     ])
-        .then(([dataPositions, dataTemps]) => {
-            if (dataTemps && dataTemps.entity) {
-                donneesTempsReel = dataTemps.entity;
-            }
-            const tripUpdates = new Map();
-            if (dataTemps && dataTemps.entity) {
-                dataTemps.entity.forEach(e => {
-                    if (e.tripUpdate && e.tripUpdate.trip && e.tripUpdate.trip.tripId) {
-                        tripUpdates.set(e.tripUpdate.trip.tripId, e.tripUpdate);
-                    }
-                });
-            }
-            const idBusActifs = new Set();
-            if (dataPositions && dataPositions.entity) {
-                dataPositions.entity.forEach(entite => {
-                    if (entite.vehicle && entite.vehicle.position) {
-                        const lat = entite.vehicle.position.latitude;
-                        const lon = entite.vehicle.position.longitude;
-                        const rawRouteId = entite.vehicle.trip ? entite.vehicle.trip.routeId : "Inconnue";
-                        const idBus = entite.vehicle.vehicle ? entite.vehicle.vehicle.id : "Inconnu";
-
-                        // 🚨 IL FAUT REMONTER CETTE LIGNE ICI (avant le filtre !) 🚨
-                        const tripId = entite.vehicle.trip ? entite.vehicle.trip.tripId : null;
-
-                        // === LE FILTRE CHIRURGICAL ===
-                        if (modeItineraireActif) {
-                            // Mode GPS : On cache absolument tout SAUF le(s) bus exact(s) de ton trajet
-                            if (!tripsItineraire.has(tripId)) return;
-                        } else if (lignesFiltrees.size > 0) {
-                            // Mode normal : On utilise les boutons du menu latéral
-                            if (!lignesFiltrees.has(rawRouteId)) return;
-                        }
-                        // =============================
-
-                        idBusActifs.add(idBus); // Ce bus a survécu au filtre, on le garde
-                        const destination = (entite.vehicle.vehicle && entite.vehicle.vehicle.label) ? entite.vehicle.vehicle.label : "Destination inconnue";
-                        let texteAffluence = "";
-                        if (entite.vehicle.occupancyStatus) {
-                            texteAffluence = `<br>Affluence : <b>${traductionsAffluence[entite.vehicle.occupancyStatus] || "Inconnue"}</b>`;
-                        }
-                        let nomAffiche = rawRouteId.replace("TCAR:", "");
-                        let couleur = "#555";
-                        if (infosLignes[rawRouteId]) {
-                            nomAffiche = infosLignes[rawRouteId].nom;
-                            couleur = infosLignes[rawRouteId].couleur;
-                        }
-                        let infoTemps = "<i>Pas d'info temps réel</i>";
-                        if (tripId && tripUpdates.has(tripId)) {
-                            const update = tripUpdates.get(tripId);
-                            if (update.stopTimeUpdate && update.stopTimeUpdate.length > 0) {
-                                const prochainArret = update.stopTimeUpdate[0];
-                                let retMin = Math.round((prochainArret.departure?.delay || 0) / 60);
-                                if (retMin > 0) infoTemps = `<span style="color:red">En retard de ${retMin} min</span>`;
-                                else if (retMin < 0) infoTemps = `<span style="color:green">En avance de ${Math.abs(retMin)} min</span>`;
-                                else infoTemps = `<span style="color:green">À l'heure exacte</span>`;
-                            }
-                        }
-                        const textePopup = `<b>Véhicule n°${idBus}</b><br>Ligne : <b><span style="color:${couleur}">${nomAffiche}</span></b><br>Direction : <b>${destination}</b><br>État : ${infoTemps}${texteAffluence}`;
-
-                        if (marqueursBus[idBus]) {
-                            const busInfo = marqueursBus[idBus];
-                            const oldLngLat = busInfo.marker.getLngLat();
-                            busInfo.startLngLat = [oldLngLat.lng, oldLngLat.lat];
-                            busInfo.targetLngLat = [lon, lat];
-                            busInfo.startTime = performance.now();
-                            busInfo.popup.setHTML(textePopup);
-                        } else {
-                            const el = document.createElement('div');
-                            el.className = 'bus-icon';
-                            el.innerHTML = '🚌';
-                            const popup = new maplibregl.Popup({ offset: 25 }).setHTML(textePopup);
-                            const marker = new maplibregl.Marker({ element: el })
-                                .setLngLat([lon, lat])
-                                .setPopup(popup)
-                                .addTo(map);
-                            marqueursBus[idBus] = { marker: marker, popup: popup, element: el, targetLngLat: [lon, lat] };
-                        }
-                    }
-                });
-            }
-            for (const id in marqueursBus) {
-                if (!idBusActifs.has(id)) {
-                    marqueursBus[id].marker.remove();
-                    delete marqueursBus[id];
+    .then(([dataPositions, dataTemps]) => {
+        if (dataTemps && dataTemps.entity) {
+            donneesTempsReel = dataTemps.entity;
+        }
+        
+        const tripUpdates = new Map();
+        if (dataTemps && dataTemps.entity) {
+            dataTemps.entity.forEach(e => {
+                if (e.tripUpdate && e.tripUpdate.trip && e.tripUpdate.trip.tripId) {
+                    tripUpdates.set(e.tripUpdate.trip.tripId, e.tripUpdate);
                 }
+            });
+        }
+
+        const idBusActifs = new Set();
+        if (dataPositions && dataPositions.entity) {
+            dataPositions.entity.forEach(entite => {
+                if (entite.vehicle && entite.vehicle.position) {
+                    const lat = entite.vehicle.position.latitude;
+                    const lon = entite.vehicle.position.longitude;
+                    const rawRouteId = entite.vehicle.trip ? entite.vehicle.trip.routeId : "Inconnue";
+                    
+                    // 🚨 LE VIGILE EST ICI : On élimine les lignes inconnues ("?") immédiatement !
+                    if (rawRouteId !== 'TCAR:90' && !infosLignes[rawRouteId]) {
+                        return; // On stoppe tout pour ce bus, il n'ira pas sur la carte.
+                    }
+
+                    const idBus = entite.vehicle.vehicle ? entite.vehicle.vehicle.id : "Inconnu";
+                    const tripId = entite.vehicle.trip ? entite.vehicle.trip.tripId : null;
+
+                    // Filtre Itinéraire / Menu
+                    if (modeItineraireActif) {
+                        if (!tripsItineraire.has(tripId)) return;
+                    } else if (lignesFiltrees.size > 0) {
+                        if (!lignesFiltrees.has(rawRouteId)) return;
+                    }
+
+                    idBusActifs.add(idBus);
+
+                    // Infos Popup
+                    const destination = (entite.vehicle.vehicle && entite.vehicle.vehicle.label) ? entite.vehicle.vehicle.label : "Destination inconnue";
+                    const infoLigne = infosLignes[rawRouteId] || { nom: rawRouteId.replace("TCAR:", ""), couleur: "#555" };
+                    const textePopup = `<b>Ligne ${infoLigne.nom}</b><br>Direction : ${destination}`;
+
+                    // --- GESTION DU MARQUEUR ---
+                    if (marqueursBus[idBus]) {
+                        const busInfo = marqueursBus[idBus];
+                        const oldLngLat = busInfo.marker.getLngLat();
+                        busInfo.startLngLat = [oldLngLat.lng, oldLngLat.lat];
+                        busInfo.targetLngLat = [lon, lat];
+                        busInfo.startTime = performance.now();
+                        busInfo.popup.setHTML(textePopup);
+                    } else {
+                        const el = document.createElement('div');
+                        
+                        // LOGIQUE D'ICÔNE (Plus besoin du "?")
+                        if (rawRouteId === 'TCAR:90') {
+                            el.className = 'bus-icon';
+                            el.innerHTML = '🚇';
+                        } else {
+                            const info = infosLignes[rawRouteId];
+                            el.className = 'line-badge-icon';
+                            el.style.backgroundColor = info.couleur;
+                            el.innerHTML = info.nom;
+                        }
+
+                        const popup = new maplibregl.Popup({ offset: 25 }).setHTML(textePopup);
+                        const marker = new maplibregl.Marker({ element: el })
+                            .setLngLat([lon, lat])
+                            .setPopup(popup)
+                            .addTo(map);
+
+                        marqueursBus[idBus] = {
+                            marker: marker,
+                            popup: popup,
+                            startLngLat: [lon, lat],
+                            targetLngLat: [lon, lat],
+                            startTime: null
+                        };
+                    }
+                }
+            });
+        }
+
+        // Nettoyage
+        for (const id in marqueursBus) {
+            if (!idBusActifs.has(id)) {
+                marqueursBus[id].marker.remove();
+                delete marqueursBus[id];
             }
-            document.getElementById('heure-maj').textContent = "Dernière position : " + new Date().toLocaleTimeString();
-        })
-        .catch(erreur => console.error("Erreur :", erreur));
+        }
+        document.getElementById('heure-maj').textContent = "Mise à jour : " + new Date().toLocaleTimeString();
+    })
+    .catch(erreur => console.error("Erreur positions :", erreur));
 }
 
 const DUREE_ANIMATION = 2000;
@@ -291,23 +296,23 @@ function chargerInfoTrafic() {
         .then(res => res.json())
         .then(data => {
             const liste = document.getElementById('liste-perturbations');
-            liste.innerHTML = ''; 
-            
+            liste.innerHTML = '';
+
             let aDesPerturbations = false;
             let listeAlertes = Array.isArray(data) ? data : (data.data || data.disruptions || []);
 
             // S'il y a au moins une alerte dans les données, on va afficher la bannière !
             if (listeAlertes.length > 0) {
                 listeAlertes.forEach(alerte => {
-                    
+
                     // ON FORCE L'AFFICHAGE DÈS QU'IL Y A UNE ALERTE
-                    aDesPerturbations = true; 
-                    
+                    aDesPerturbations = true;
+
                     const li = document.createElement('li');
                     li.style.marginBottom = "10px";
                     li.style.paddingBottom = "10px";
                     li.style.borderBottom = "1px solid #fecaca";
-                    
+
                     // 1. On récupère le titre (très robuste)
                     let titre = "Information réseau";
                     if (alerte.messages && alerte.messages.length > 0 && alerte.messages[0].title) {
@@ -315,9 +320,9 @@ function chargerInfoTrafic() {
                     } else if (alerte.title) {
                         titre = alerte.title;
                     }
-                    
+
                     let texteAlerte = `<b style="display:block; margin-bottom:4px;">${titre}</b>`;
-                    
+
                     // 2. On essaie d'ajouter les badges des lignes SI on les trouve
                     let htmlBadges = "";
                     let idsVus = new Set();
@@ -326,11 +331,11 @@ function chargerInfoTrafic() {
                         alerte.impactedObjects.forEach(obj => {
                             // On cherche la ligne dans tous les recoins de l'API Cityway
                             const ligne = obj.impactedLine || (obj.impactedPtElement ? obj.impactedPtElement.line : null) || obj.impactedRoute;
-                            
+
                             if (ligne && ligne.id && !idsVus.has(ligne.id)) {
                                 idsVus.add(ligne.id);
-                                const idLigne = ligne.id.replace('Astuce:', 'TCAR:'); 
-                                
+                                const idLigne = ligne.id.replace('Astuce:', 'TCAR:');
+
                                 if (infosLignes && infosLignes[idLigne]) {
                                     htmlBadges += `<span style="background:${infosLignes[idLigne].couleur}; color:white; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px; display:inline-block;">${infosLignes[idLigne].nom}</span>`;
                                 } else {
@@ -339,7 +344,7 @@ function chargerInfoTrafic() {
                             }
                         });
                     }
-                    
+
                     // Si on a trouvé des lignes, on les affiche sous le titre
                     if (htmlBadges !== "") {
                         texteAlerte += `<div style="display:flex; gap:5px; flex-wrap:wrap;">${htmlBadges}</div>`;
@@ -629,15 +634,20 @@ async function lancerCalcul(mode) {
             await dessinerItineraireTransit(meilleurTrajet, coordsDep, coordsArr);
 
             ajouterDrapeau(coordsDep, '🏠', "Votre départ");
-            ajouterDrapeau([meilleurTrajet.dep.lon, meilleurTrajet.dep.lat], '🚌', `Monter à : ${meilleurTrajet.dep.n}`);
-            ajouterDrapeau([meilleurTrajet.arr.lon, meilleurTrajet.arr.lat], '🏁', `Descendre à : ${meilleurTrajet.arr.n}`);
-            if (meilleurTrajet.type === 'correspondance') {
-                ajouterDrapeau([meilleurTrajet.pivot.lon, meilleurTrajet.pivot.lat], '🏁', `Descendre ici (${meilleurTrajet.pivot.n})`);
-                if (meilleurTrajet.pivot.n !== meilleurTrajet.pivot2.n || meilleurTrajet.pivot.lat !== meilleurTrajet.pivot2.lat) {
-                    ajouterDrapeau([meilleurTrajet.pivot2.lon, meilleurTrajet.pivot2.lat], '🚌', `Reprendre ici (${meilleurTrajet.pivot2.n})`);
-                }
+            // On récupère l'ID de la ligne (directe ou correspondance)
+            // Détermination de l'icône du drapeau
+            const idLigneTrajet = meilleurTrajet.type === 'direct' ? meilleurTrajet.ligne.split('::')[0] : meilleurTrajet.ligne1.split('::')[0];
+            let iconeDrapeau = '🚌';
+
+            if (idLigneTrajet === 'TCAR:90') {
+                iconeDrapeau = '🚇';
+            } else if (['TCAR:91', 'TCAR:92', 'TCAR:93', 'TCAR:94'].includes(idLigneTrajet)) {
+                const info = infosLignes[idLigneTrajet];
+                // On crée un petit badge HTML pour le drapeau aussi !
+                iconeDrapeau = `<div class="line-badge-icon" style="background-color:${info.couleur}; width:24px; height:24px; font-size:10px;">${info.nom}</div>`;
             }
-            ajouterDrapeau(coordsArr, '🎯', "Votre destination");
+
+            ajouterDrapeau([meilleurTrajet.dep.lon, meilleurTrajet.dep.lat], iconeDrapeau, `Monter à : ${meilleurTrajet.dep.n}`);
 
             // === ISOLER LE(S) VÉHICULE(S) EXACT(S) ===
             tripsItineraire.clear();
@@ -809,8 +819,12 @@ function nettoyerAncienTrajet() {
 
     if (map.getLayer('itineraire-layer')) map.removeLayer('itineraire-layer');
     if (map.getSource('itineraire')) map.removeSource('itineraire');
+    
+    // On nettoie aussi l'isochrone
+    if (map.getLayer('isochrone-fill')) map.removeLayer('isochrone-fill');
+    if (map.getLayer('isochrone-outline')) map.removeLayer('isochrone-outline');
+    if (map.getSource('isochrone-source')) map.removeSource('isochrone-source');
 
-    // NOUVEAU : On efface aussi les segments découpés
     if (map.getLayer('itineraire-transit-bus')) map.removeLayer('itineraire-transit-bus');
     if (map.getLayer('itineraire-transit-marche')) map.removeLayer('itineraire-transit-marche');
     if (map.getSource('itineraire-transit')) map.removeSource('itineraire-transit');
@@ -864,7 +878,7 @@ async function dessinerItineraireTransit(trajet, coordsDep, coordsArr) {
     };
 
     // --- CONSTRUCTION DE L'ITINÉRAIRE ---
-    
+
     // 1. Marche : Maison -> Premier arrêt
     const chemin1 = await obtenirCheminMarche(coordsDep, [trajet.dep.lon, trajet.dep.lat]);
     features.push({ type: 'Feature', properties: { color: '#64748b', dashed: true }, geometry: { type: 'LineString', coordinates: chemin1 } });
@@ -879,13 +893,13 @@ async function dessinerItineraireTransit(trajet, coordsDep, coordsArr) {
         const routeId2 = trajet.ligne2.split('::')[0];
         const c1 = infosLignes[routeId1] ? infosLignes[routeId1].couleur : '#333';
         const c2 = infosLignes[routeId2] ? infosLignes[routeId2].couleur : '#333';
-        
+
         ajouterBus(routeId1, trajet.dep.lat, trajet.dep.lon, trajet.pivot.lat, trajet.pivot.lon, c1);
-        
+
         // Marche de transfert entre les deux bus
         const cheminTrans = await obtenirCheminMarche([trajet.pivot.lon, trajet.pivot.lat], [trajet.pivot2.lon, trajet.pivot2.lat]);
         features.push({ type: 'Feature', properties: { color: '#64748b', dashed: true }, geometry: { type: 'LineString', coordinates: cheminTrans } });
-        
+
         ajouterBus(routeId2, trajet.pivot2.lat, trajet.pivot2.lon, trajet.arr.lat, trajet.arr.lon, c2);
     }
 

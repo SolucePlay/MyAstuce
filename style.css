@@ -131,6 +131,28 @@ body, html {
     color: #0f172a;
 }
 
+/* Style pour les pastilles de lignes TEOR (T1, T2...) */
+.line-badge-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px; /* Un peu plus large pour les noms à 2-3 caractères */
+    height: 32px;
+    border-radius: 50%;
+    color: white;
+    font-weight: 800; /* Texte bien épais */
+    font-size: 10px;  /* Taille adaptée pour F3, 41, etc. */
+    border: 2px solid white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    text-align: center;
+    line-height: 1;
+}
+
+.bus-icon {
+    font-size: 22px;
+    cursor: pointer;
+}
+
 /* === PLANIFICATEUR D'ITINÉRAIRE === */
 .input-it {
     width: 100%;
