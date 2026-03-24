@@ -187,26 +187,29 @@ body, html {
     transform: translateY(-2px);
 }
 
-/* === LE PANNEAU DE DROITE (INFO-TRAFIC) === */
-.sidebar-right {
-    position: absolute;
+/* === LE PANNEAU DE DROITE (INFO-TRAFIC - VERSION BLINDÉE MOBILE) === */
+#sidebar-right {
+    position: fixed !important;
     top: 0;
-    right: 0;
-    left: auto; /* Annule l'alignement à gauche de l'autre menu */
-    width: 320px; /* Largeur fixe pour ne pas écraser la carte */
+    right: 0 !important;
+    left: auto !important; /* Annule l'ancrage à gauche du menu classique */
+    width: 100%;
+    max-width: 320px;
     height: 100vh;
-    background-color: #ffffff; /* Le fond blanc opaque indispensable ! */
-    z-index: 2000; /* Doit être au-dessus de la carte (1000) */
-    transform: translateX(100%);
-    transition: transform 0.3s ease-in-out;
+    background-color: #ffffff;
+    z-index: 2000;
+    /* 🚨 L'ÉLÉMENT CLÉ : On le force à sortir par la DROITE (+100%) */
+    transform: translateX(100%) !important; 
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     border-left: 1px solid #cbd5e1;
-    box-shadow: -4px 0 15px rgba(0, 0, 0, 0.1); /* Belle ombre sur la gauche */
+    box-shadow: -4px 0 15px rgba(0, 0, 0, 0.1);
     display: flex;
     flex-direction: column;
 }
 
-.sidebar-right.ouverte {
-    transform: translateX(0);
+/* Quand on l'ouvre, on le force à revenir à sa place */
+#sidebar-right.ouverte {
+    transform: translateX(0) !important;
 }
 
 /* Pour que la liste des 52 alertes puisse défiler proprement */
