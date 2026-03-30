@@ -29,7 +29,12 @@ git clone https://github.com/SolucePlay/MyAstuce.git
 4. Ouvrez `index.html` dans votre navigateur.
 
 ## 📸 Captures d'écran
-*(Ajoutez ici vos images en remplaçant ce texte)*
+
+![Aperçu de l'application](https://github.com/user-attachments/assets/3d388e66-2ef6-4858-9154-f1f870ff64ad)
+![Aperçu de l'application](https://github.com/user-attachments/assets/fb4b8245-e70e-46c9-a5d0-a86cbb855b4a)
+
+
+
 ## 🎯 Pourquoi ce projet ?
 J'ai construit ce projet pour relever un défi d'ingénierie : comprendre et recréer la logique complexe derrière les grandes applications de transport. Gérer les aléas du direct, les coordonnées GPS, et l'expérience utilisateur m'a permis de consolider mes compétences en algorithmie et en développement Front-End avancé.
 
