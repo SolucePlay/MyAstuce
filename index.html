@@ -3,7 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Astuce Live 3D</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,54 +30,49 @@
             </div>
 
             <div class="sidebar-content">
-                <div class="recherche-section">
-                    <h3>Planifier un trajet</h3>
+                <div id="carte-itineraire-mobile">
+                    <div class="recherche-section">
+                        <h3>Planifier un trajet</h3>
 
-                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                        <button id="btn-fav-domicile"
-                            style="flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; color: #334155; font-weight: bold; transition: 0.2s;">
-                            🏠 Domicile
-                        </button>
-                        <button id="btn-fav-ecole"
-                            style="flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; color: #334155; font-weight: bold; transition: 0.2s;">
-                            🎒 Lycée/Travail
-                        </button>
-                    </div>
+                        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                            <button id="btn-fav-domicile"
+                                style="flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; color: #334155; font-weight: bold; transition: 0.2s;">
+                                🏠 Domicile
+                            </button>
+                            <button id="btn-fav-ecole"
+                                style="flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; color: #334155; font-weight: bold; transition: 0.2s;">
+                                🎒 Lycée/Travail
+                            </button>
+                        </div>
 
-                    <div style="display: flex; gap: 5px; margin-bottom: 8px;">
-                        <input type="text" id="input-depart" class="input-it" placeholder="Départ (ex: Mairie)"
-                            style="margin-bottom: 0;">
-                        <button id="btn-ma-position"
-                            style="padding: 10px; background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer;"
-                            title="Utiliser ma position">📍</button>
-                    </div>
+                        <div style="display: flex; gap: 5px; margin-bottom: 8px;">
+                            <input type="text" id="input-depart" class="input-it" placeholder="Départ (ex: Mairie)"
+                                style="margin-bottom: 0;">
+                            <button id="btn-ma-position"
+                                style="padding: 10px; background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer;"
+                                title="Utiliser ma position">📍</button>
+                        </div>
 
-                    <input type="text" id="input-arrivee" class="input-it" placeholder="Arrivée (ex: Zénith)">
+                        <input type="text" id="input-arrivee" class="input-it" placeholder="Arrivée (ex: Zénith)">
 
-                    <div class="boutons-mode">
-                        <button id="btn-marche" class="btn-mode" title="À pied">🚶</button>
-                        <button id="btn-voiture" class="btn-mode" title="En voiture">🚗</button>
-                        <button id="btn-transit" class="btn-mode" title="En bus/métro">🚌</button>
-                    </div>
+                        <div class="boutons-mode">
+                            <button id="btn-marche" class="btn-mode" title="À pied">🚶</button>
+                            <button id="btn-voiture" class="btn-mode" title="En voiture">🚗</button>
+                            <button id="btn-transit" class="btn-mode" title="En bus/métro">🚌</button>
+                        </div>
 
-                    <div id="resultats-it"></div>
+                        <div id="resultats-it"></div>
 
-                    <div style="display: flex; gap: 10px; margin-top: 15px;">
-                        <button id="btn-demarrer-it"
-                            style="display:none; flex: 2; padding: 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 16px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); transition: 0.2s;">
-                            🚀 Démarrer l'itinéraire
-                        </button>
-                        <button id="btn-effacer-it"
-                            style="display:none; flex: 1; padding: 12px; background: #fee2e2; color: #ef4444; border: 1px solid #fca5a5; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s;">
-                            🗑️ Effacer
-                        </button>
-                    </div>
-
-                    <div id="notification-validation"
-                        style="position: fixed; top: -100px; left: 50%; transform: translateX(-50%); background: #f59e0b; color: white; padding: 15px 20px; border-radius: 8px; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 9999; display: flex; align-items: center; gap: 12px; width: 80%; max-width: 400px;">
-                        <span style="font-size: 28px;">🎫</span>
-                        <span style="font-size: 14px; line-height: 1.4;">Pensez à valider votre titre (QR Code ou Carte
-                            Astuce) en montant dans le véhicule via l'app MyAstuce !</span>
+                        <div style="display: flex; gap: 10px; margin-top: 15px;">
+                            <button id="btn-demarrer-it"
+                                style="display:none; flex: 2; padding: 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 16px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); transition: 0.2s;">
+                                🚀 Démarrer l'itinéraire
+                            </button>
+                            <button id="btn-effacer-it"
+                                style="display:none; flex: 1; padding: 12px; background: #fee2e2; color: #ef4444; border: 1px solid #fca5a5; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s;">
+                                🗑️ Effacer
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;">
@@ -111,10 +107,18 @@
             <div id="map"></div>
         </main>
     </div>
+    <div id="notification-validation"
+        style="position: fixed; top: -100px; left: 50%; transform: translateX(-50%); background: #f59e0b; color: white; padding: 15px 20px; border-radius: 8px; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 9999; display: flex; align-items: center; gap: 12px; width: 80%; max-width: 400px;">
+        <span style="font-size: 28px;">🎫</span>
+        <span style="font-size: 14px; line-height: 1.4;">Pensez à valider votre titre (QR Code ou
+            Carte
+            Astuce) en montant dans le véhicule via l'app MyAstuce !</span>
+    </div>
 
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
     <script src="data.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
     <script src="app.js"></script>
     <script>
         // === DÉMARRAGE DE L'APPLICATION PWA ===

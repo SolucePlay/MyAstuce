@@ -131,6 +131,38 @@ body, html {
     color: #0f172a;
 }
 
+/* Le style de la barre de catégorie */
+.categorie-header {
+    display: flex;
+    justify-content: space-between; /* Titre à gauche, flèche à droite */
+    align-items: center;
+    cursor: pointer;
+    padding: 12px 0;
+    margin-top: 10px;
+    border-bottom: 2px solid #e2e8f0;
+    user-select: none; /* Empêche le texte d'être surligné si on clique vite */
+}
+
+.categorie-header h4 {
+    color: #334155;
+}
+
+/* La petite flèche animée */
+.categorie-fleche {
+    font-size: 14px;
+    color: #64748b;
+    transition: transform 0.3s ease; /* L'animation de rotation qui fait "pro" */
+}
+
+/* La grille des boutons quand elle est ouverte */
+.sous-grille-boutons {
+    display: flex; /* Ne pas mettre 'none' ici, le JavaScript s'en occupe */
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 15px;
+    padding-bottom: 15px;
+}
+
 /* Style pour les pastilles de lignes TEOR (T1, T2...) */
 .line-badge-icon {
     display: flex;
@@ -277,11 +309,17 @@ body, html {
     .sidebar {
         position: absolute;
         height: 100%;
-        transform: translateX(-100%); /* Caché à gauche par défaut */
+        left: -350px; /* On cache le menu hors de l'écran sans utiliser transform */
+        transition: left 0.3s ease;
+        transform: none !important; /* 🚨 LA MAGIE OPÈRE ICI : Libère la carte itinéraire ! */
     }
     
     .sidebar.ouverte {
-        transform: translateX(0); /* S'affiche quand on ajoute la classe */
+        left: 0; /* Fait glisser le menu à l'écran */
+    }
+
+    .sidebar-content {
+        padding-bottom: 380px; /* Ajoute du vide en bas de la liste pour qu'elle ne soit pas cachée par la carte itinéraire */
     }
 
     .menu-toggle {
@@ -315,3 +353,60 @@ body, html {
 .close-btn {
         display: block; /* On affiche la croix sur téléphone */
     }
+
+/* =========================================
+   📱 MODE MOBILE EXCLUSIF (Android & iOS)
+   ========================================= */
+@media screen and (max-width: 768px) {
+    
+    /* 1. On détache la boîte et on la fait flotter en bas */
+    #carte-itineraire-mobile {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background-color: #ffffff;
+        
+        /* Les beaux bords arrondis style Apple Maps / Citymapper */
+        border-top-left-radius: 25px;
+        border-top-right-radius: 25px;
+        
+        /* L'ombre pour l'effet de flottaison au-dessus de la carte */
+        box-shadow: 0px -4px 20px rgba(0, 0, 0, 0.15);
+        
+        padding: 20px;
+        box-sizing: border-box;
+        z-index: 1000; /* Toujours au-dessus de la carte */
+        
+        /* Transition douce si tu veux l'animer plus tard */
+        transition: transform 0.3s ease-out;
+    }
+
+    /* 2. On rend les boutons plus larges et cliquables pour les pouces */
+    #carte-itineraire-mobile input {
+        width: 100%;
+        padding: 12px;
+        margin-bottom: 10px;
+        font-size: 16px; /* Empêche le zoom auto énervant sur iOS */
+        border-radius: 10px;
+        border: 1px solid #cbd5e1;
+    }
+
+    #carte-itineraire-mobile button {
+        padding: 12px;
+        border-radius: 10px;
+        flex: 1; /* Les boutons prennent toute la largeur disponible */
+        font-size: 14px;
+        font-weight: bold;
+    }
+
+    /* 3. On remonte un peu les logos Mapbox/MapLibre pour ne pas les cacher */
+    .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right {
+        bottom: 300px !important; /* Ajuste cette valeur selon la hauteur de ta carte flotante */
+    }
+
+    /* 🚨 LA MAGIE ICI : On cache la carte itinéraire quand le menu s'ouvre */
+    .sidebar.ouverte #carte-itineraire-mobile {
+        transform: translateY(150%); /* Fait glisser la boîte vers le bas hors de l'écran */
+    }
+}

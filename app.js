@@ -1,7 +1,25 @@
 let marqueursItineraire = []; // Liste pour stocker les drapeaux de trajet
 let donneesTempsReel = [];
 
+const HORAIRES_STATIQUES = {
+    "TCAR:90": { // Métro - Direction Georges Braque (Période Bleue Soir)
+        "Boulingrin": ["21:56", "22:11", "22:26", "22:41", "22:56", "23:11", "23:26", "23:41", "23:56", "00:11"], // [cite: 334, 376]
+        "frequence_soir": 15 // minutes [cite: 346]
+    }
+    // Tu pourras ajouter le F6 et les autres périodes ici
+};
 
+function chercherHoraireTheorique(routeId) {
+    const maintenant = new Date();
+    const heureActuelle = maintenant.getHours() + ":" + maintenant.getMinutes().toString().padStart(2, '0');
+
+    const data = HORAIRES_STATIQUES[routeId];
+    if (!data) return null;
+
+    // On cherche l'horaire dans le PDF qui est juste après l'heure actuelle 
+    const prochain = data.Boulingrin.find(h => h > heureActuelle);
+    return prochain ? prochain : null;
+}
 
 // === INITIALISATION DE LA CARTE MAPLIBRE 3D ===
 const map = new maplibregl.Map({
@@ -25,30 +43,8 @@ let lignesFiltrees = new Set();
 let marqueursBus = {};
 let modeItineraireActif = false;
 let tripsItineraire = new Set(); // Mémoire pour stocker LE bus exact
-
-const grid = document.getElementById('lignes-grid');
-for (const [codeTcar, infos] of Object.entries(infosLignes)) {
-    const btn = document.createElement('button');
-    btn.className = 'ligne-btn';
-    btn.textContent = infos.nom;
-    btn.style.borderColor = infos.couleur;
-    btn.style.color = infos.couleur;
-
-    btn.onclick = () => {
-        if (lignesFiltrees.has(codeTcar)) {
-            lignesFiltrees.delete(codeTcar);
-            btn.style.backgroundColor = "transparent";
-            btn.style.color = infos.couleur;
-        } else {
-            lignesFiltrees.add(codeTcar);
-            btn.style.backgroundColor = infos.couleur;
-            btn.style.color = "white";
-        }
-        chargerPositionsBus();
-        dessinerTraces();
-    };
-    grid.appendChild(btn);
-}
+let tracesLignes = {};
+let reseauArrets = {};
 
 document.getElementById('menu-toggle').addEventListener('click', () => {
     document.getElementById('sidebar').classList.add('ouverte');
@@ -127,35 +123,93 @@ document.getElementById('search-trafic').addEventListener('input', (e) => {
 });
 
 function dessinerTraces() {
-    let features = [];
+    let featuresLignes = [];
+    let featuresArrets = [];
+    let arretsVus = new Set(); // Pour éviter de dessiner 2 fois un arrêt si deux lignes le partagent
+
     lignesFiltrees.forEach(routeId => {
+        const couleurLigne = infosLignes[routeId] ? infosLignes[routeId].couleur : '#333';
+
+        // 1. On prépare le tracé du bus
         const branches = tracesLignes[routeId];
-        const couleur = infosLignes[routeId] ? infosLignes[routeId].couleur : '#333';
         if (branches && branches.length > 0) {
             branches.forEach(brancheCoordonnees => {
                 const coordsInversees = brancheCoordonnees.map(pt => [pt[1], pt[0]]);
-                features.push({
+                featuresLignes.push({
                     type: 'Feature',
-                    properties: { color: couleur },
+                    properties: { color: couleurLigne },
                     geometry: { type: 'LineString', coordinates: coordsInversees }
                 });
             });
         }
+
+        // 2. On prépare tous les arrêts de ce bus
+        for (const [idArret, arret] of Object.entries(reseauArrets)) {
+            // Si le bus passe par cet arrêt, on le prépare pour l'affichage
+            if (arret.lignes[routeId] !== undefined && !arretsVus.has(idArret)) {
+                arretsVus.add(idArret);
+                featuresArrets.push({
+                    type: 'Feature',
+                    properties: { nom: arret.n, couleur: couleurLigne },
+                    geometry: { type: 'Point', coordinates: [arret.lon, arret.lat] }
+                });
+            }
+        }
     });
-    const dataGeoJSON = { type: 'FeatureCollection', features: features };
+
+    // --- MISE À JOUR DE LA CARTE ---
+
+    // A. Affichage des tracés (Le ruban de couleur)
+    const dataLignes = { type: 'FeatureCollection', features: featuresLignes };
     if (map.getSource('traces')) {
-        map.getSource('traces').setData(dataGeoJSON);
+        map.getSource('traces').setData(dataLignes);
     } else {
-        map.addSource('traces', { type: 'geojson', data: dataGeoJSON });
+        map.addSource('traces', { type: 'geojson', data: dataLignes });
         map.addLayer({
             id: 'traces-layer',
             type: 'line',
             source: 'traces',
             layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 0.8 }
+        });
+    }
+
+    // B. Affichage des arrêts (Les ronds blancs + le texte)
+    const dataArrets = { type: 'FeatureCollection', features: featuresArrets };
+    if (map.getSource('arrets-source')) {
+        map.getSource('arrets-source').setData(dataArrets);
+    } else {
+        map.addSource('arrets-source', { type: 'geojson', data: dataArrets });
+
+        // Les pastilles blanches avec contour coloré
+        map.addLayer({
+            id: 'arrets-cercle',
+            type: 'circle',
+            source: 'arrets-source',
             paint: {
-                'line-color': ['get', 'color'],
-                'line-width': 5,
-                'line-opacity': 0.8
+                'circle-radius': 5,
+                'circle-color': '#ffffff', // Blanc à l'intérieur
+                'circle-stroke-width': 3,
+                'circle-stroke-color': ['get', 'couleur'] // Contour de la couleur du bus
+            }
+        });
+
+        // Le texte du nom de l'arrêt
+        map.addLayer({
+            id: 'arrets-texte',
+            type: 'symbol',
+            source: 'arrets-source',
+            minzoom: 14.5, // 🚨 Le texte n'apparaît que si on zoome pour ne pas polluer l'écran !
+            layout: {
+                'text-field': ['get', 'nom'],
+                'text-anchor': 'left',
+                'text-offset': [0.8, 0],
+                'text-size': 12
+            },
+            paint: {
+                'text-color': '#1e293b',
+                'text-halo-color': '#ffffff', // Léger contour blanc pour que le texte soit lisible sur les bâtiments
+                'text-halo-width': 2
             }
         });
     }
@@ -170,130 +224,130 @@ function chargerPositionsBus() {
         fetch(urlPositions).then(res => res.json()),
         fetch(urlTemps).then(res => res.json())
     ])
-    .then(([dataPositions, dataTemps]) => {
-        if (dataTemps && dataTemps.entity) {
-            donneesTempsReel = dataTemps.entity;
-        }
-        
-        const tripUpdates = new Map();
-        if (dataTemps && dataTemps.entity) {
-            dataTemps.entity.forEach(e => {
-                if (e.tripUpdate && e.tripUpdate.trip && e.tripUpdate.trip.tripId) {
-                    tripUpdates.set(e.tripUpdate.trip.tripId, e.tripUpdate);
-                }
-            });
-        }
-
-        const idBusActifs = new Set();
-        if (dataPositions && dataPositions.entity) {
-            dataPositions.entity.forEach(entite => {
-                if (entite.vehicle && entite.vehicle.position) {
-                    const lat = entite.vehicle.position.latitude;
-                    const lon = entite.vehicle.position.longitude;
-                    const rawRouteId = entite.vehicle.trip ? entite.vehicle.trip.routeId : "Inconnue";
-                    
-                    // 🚨 LE VIGILE EST ICI : On élimine les lignes inconnues ("?") immédiatement !
-                    if (rawRouteId !== 'TCAR:90' && !infosLignes[rawRouteId]) {
-                        return; // On stoppe tout pour ce bus, il n'ira pas sur la carte.
-                    }
-
-                    const idBus = entite.vehicle.vehicle ? entite.vehicle.vehicle.id : "Inconnu";
-                    const tripId = entite.vehicle.trip ? entite.vehicle.trip.tripId : null;
-
-                    // Filtre Itinéraire / Menu
-                    if (modeItineraireActif) {
-                        if (!tripsItineraire.has(tripId)) return;
-                    } else if (lignesFiltrees.size > 0) {
-                        if (!lignesFiltrees.has(rawRouteId)) return;
-                    }
-
-                    idBusActifs.add(idBus);
-
-                    // 1. Infos de base (Ligne et Destination)
-                    const destination = (entite.vehicle.vehicle && entite.vehicle.vehicle.label) ? entite.vehicle.vehicle.label : "Destination inconnue";
-                    const infoLigne = infosLignes[rawRouteId] || { nom: rawRouteId.replace("TCAR:", ""), couleur: "#555" };
-
-                    // 2. LE RETARD ET L'AVANCE (Le retour !)
-                    let infoTemps = "<i>Pas d'info temps réel</i>";
-                    if (tripId && tripUpdates.has(tripId)) {
-                        const update = tripUpdates.get(tripId);
-                        if (update.stopTimeUpdate && update.stopTimeUpdate.length > 0) {
-                            const delay = update.stopTimeUpdate[0].departure?.delay || 0;
-                            const retMin = Math.round(delay / 60);
-                            if (retMin > 0) infoTemps = `<span style="color:red">En retard de ${retMin} min</span>`;
-                            else if (retMin < 0) infoTemps = `<span style="color:green">En avance de ${Math.abs(retMin)} min</span>`;
-                            else infoTemps = `<span style="color:green">À l'heure exacte</span>`;
-                        }
-                    }
-
-                    // 3. L'AFFLUENCE ET LES PLACES (Le retour !)
-                    let texteAffluence = "";
-                    if (entite.vehicle.occupancyStatus) {
-                        const dicoAffluence = {
-                            "EMPTY": "Vide",
-                            "MANY_SEATS_AVAILABLE": "Beaucoup de places",
-                            "FEW_SEATS_AVAILABLE": "Peu de places",
-                            "STANDING_ROOM_ONLY": "Places debout",
-                            "CRUSHED_STANDING_ROOM_ONLY": "Très bondé",
-                            "FULL": "Complet",
-                            "NOT_ACCEPTING_PASSENGERS": "Ne prend plus de passagers"
-                        };
-                        texteAffluence = `<br>Affluence : <b>${dicoAffluence[entite.vehicle.occupancyStatus] || "Inconnue"}</b>`;
-                    }
-
-                    // 4. On rassemble toutes les infos dans la belle bulle
-                    const textePopup = `<b>Ligne ${infoLigne.nom}</b><br>Direction : ${destination}<br>État : ${infoTemps}${texteAffluence}`;
-
-                    // --- GESTION DU MARQUEUR ---
-                    if (marqueursBus[idBus]) {
-                        const busInfo = marqueursBus[idBus];
-                        const oldLngLat = busInfo.marker.getLngLat();
-                        busInfo.startLngLat = [oldLngLat.lng, oldLngLat.lat];
-                        busInfo.targetLngLat = [lon, lat];
-                        busInfo.startTime = performance.now();
-                        busInfo.popup.setHTML(textePopup);
-                    } else {
-                        const el = document.createElement('div');
-                        
-                        // LOGIQUE D'ICÔNE (Plus besoin du "?")
-                        if (rawRouteId === 'TCAR:90') {
-                            el.className = 'bus-icon';
-                            el.innerHTML = '🚇';
-                        } else {
-                            const info = infosLignes[rawRouteId];
-                            el.className = 'line-badge-icon';
-                            el.style.backgroundColor = info.couleur;
-                            el.innerHTML = info.nom;
-                        }
-
-                        const popup = new maplibregl.Popup({ offset: 25 }).setHTML(textePopup);
-                        const marker = new maplibregl.Marker({ element: el })
-                            .setLngLat([lon, lat])
-                            .setPopup(popup)
-                            .addTo(map);
-
-                        marqueursBus[idBus] = {
-                            marker: marker,
-                            popup: popup,
-                            startLngLat: [lon, lat],
-                            targetLngLat: [lon, lat],
-                            startTime: null
-                        };
-                    }
-                }
-            });
-        }
-
-        // Nettoyage
-        for (const id in marqueursBus) {
-            if (!idBusActifs.has(id)) {
-                marqueursBus[id].marker.remove();
-                delete marqueursBus[id];
+        .then(([dataPositions, dataTemps]) => {
+            if (dataTemps && dataTemps.entity) {
+                donneesTempsReel = dataTemps.entity;
             }
-        }
-        document.getElementById('heure-maj').textContent = "Mise à jour : " + new Date().toLocaleTimeString();
-    })
-    .catch(erreur => console.error("Erreur positions :", erreur));
+
+            const tripUpdates = new Map();
+            if (dataTemps && dataTemps.entity) {
+                dataTemps.entity.forEach(e => {
+                    if (e.tripUpdate && e.tripUpdate.trip && e.tripUpdate.trip.tripId) {
+                        tripUpdates.set(e.tripUpdate.trip.tripId, e.tripUpdate);
+                    }
+                });
+            }
+
+            const idBusActifs = new Set();
+            if (dataPositions && dataPositions.entity) {
+                dataPositions.entity.forEach(entite => {
+                    if (entite.vehicle && entite.vehicle.position) {
+                        const lat = entite.vehicle.position.latitude;
+                        const lon = entite.vehicle.position.longitude;
+                        const rawRouteId = entite.vehicle.trip ? entite.vehicle.trip.routeId : "Inconnue";
+
+                        // 🚨 LE VIGILE EST ICI : On élimine les lignes inconnues ("?") immédiatement !
+                        if (rawRouteId !== 'TCAR:90' && !infosLignes[rawRouteId]) {
+                            return; // On stoppe tout pour ce bus, il n'ira pas sur la carte.
+                        }
+
+                        const idBus = entite.vehicle.vehicle ? entite.vehicle.vehicle.id : "Inconnu";
+                        const tripId = entite.vehicle.trip ? entite.vehicle.trip.tripId : null;
+
+                        // Filtre Itinéraire / Menu
+                        if (modeItineraireActif) {
+                            if (!tripsItineraire.has(tripId)) return;
+                        } else if (lignesFiltrees.size > 0) {
+                            if (!lignesFiltrees.has(rawRouteId)) return;
+                        }
+
+                        idBusActifs.add(idBus);
+
+                        // 1. Infos de base (Ligne et Destination)
+                        const destination = (entite.vehicle.vehicle && entite.vehicle.vehicle.label) ? entite.vehicle.vehicle.label : "Destination inconnue";
+                        const infoLigne = infosLignes[rawRouteId] || { nom: rawRouteId.replace("TCAR:", ""), couleur: "#555" };
+
+                        // 2. LE RETARD ET L'AVANCE (Le retour !)
+                        let infoTemps = "<i>Pas d'info temps réel</i>";
+                        if (tripId && tripUpdates.has(tripId)) {
+                            const update = tripUpdates.get(tripId);
+                            if (update.stopTimeUpdate && update.stopTimeUpdate.length > 0) {
+                                const delay = update.stopTimeUpdate[0].departure?.delay || 0;
+                                const retMin = Math.round(delay / 60);
+                                if (retMin > 0) infoTemps = `<span style="color:red">En retard de ${retMin} min</span>`;
+                                else if (retMin < 0) infoTemps = `<span style="color:green">En avance de ${Math.abs(retMin)} min</span>`;
+                                else infoTemps = `<span style="color:green">À l'heure exacte</span>`;
+                            }
+                        }
+
+                        // 3. L'AFFLUENCE ET LES PLACES (Le retour !)
+                        let texteAffluence = "";
+                        if (entite.vehicle.occupancyStatus) {
+                            const dicoAffluence = {
+                                "EMPTY": "Vide",
+                                "MANY_SEATS_AVAILABLE": "Beaucoup de places",
+                                "FEW_SEATS_AVAILABLE": "Peu de places",
+                                "STANDING_ROOM_ONLY": "Places debout",
+                                "CRUSHED_STANDING_ROOM_ONLY": "Très bondé",
+                                "FULL": "Complet",
+                                "NOT_ACCEPTING_PASSENGERS": "Ne prend plus de passagers"
+                            };
+                            texteAffluence = `<br>Affluence : <b>${dicoAffluence[entite.vehicle.occupancyStatus] || "Inconnue"}</b>`;
+                        }
+
+                        // 4. On rassemble toutes les infos dans la belle bulle
+                        const textePopup = `<b>Ligne ${infoLigne.nom}</b><br>Direction : ${destination}<br>État : ${infoTemps}${texteAffluence}`;
+
+                        // --- GESTION DU MARQUEUR ---
+                        if (marqueursBus[idBus]) {
+                            const busInfo = marqueursBus[idBus];
+                            const oldLngLat = busInfo.marker.getLngLat();
+                            busInfo.startLngLat = [oldLngLat.lng, oldLngLat.lat];
+                            busInfo.targetLngLat = [lon, lat];
+                            busInfo.startTime = performance.now();
+                            busInfo.popup.setHTML(textePopup);
+                        } else {
+                            const el = document.createElement('div');
+
+                            // LOGIQUE D'ICÔNE (Plus besoin du "?")
+                            if (rawRouteId === 'TCAR:90') {
+                                el.className = 'bus-icon';
+                                el.innerHTML = '🚇';
+                            } else {
+                                const info = infosLignes[rawRouteId];
+                                el.className = 'line-badge-icon';
+                                el.style.backgroundColor = info.couleur;
+                                el.innerHTML = info.nom;
+                            }
+
+                            const popup = new maplibregl.Popup({ offset: 25 }).setHTML(textePopup);
+                            const marker = new maplibregl.Marker({ element: el })
+                                .setLngLat([lon, lat])
+                                .setPopup(popup)
+                                .addTo(map);
+
+                            marqueursBus[idBus] = {
+                                marker: marker,
+                                popup: popup,
+                                startLngLat: [lon, lat],
+                                targetLngLat: [lon, lat],
+                                startTime: null
+                            };
+                        }
+                    }
+                });
+            }
+
+            // Nettoyage
+            for (const id in marqueursBus) {
+                if (!idBusActifs.has(id)) {
+                    marqueursBus[id].marker.remove();
+                    delete marqueursBus[id];
+                }
+            }
+            document.getElementById('heure-maj').textContent = "Mise à jour : " + new Date().toLocaleTimeString();
+        })
+        .catch(erreur => console.error("Erreur positions :", erreur));
 }
 
 const DUREE_ANIMATION = 2000;
@@ -388,12 +442,327 @@ function chargerInfoTrafic() {
         .catch(erreur => console.error("❌ Erreur Info-trafic :", erreur));
 }
 
-map.on('load', () => {
+// === CONFIGURATION DU CONVERTISSEUR ET TRADUCTEUR ===
+// 🚨 DÉFINITION OFFICIELLE ET BLINDÉE POUR PROJ4JS
+proj4.defs("EPSG:3949", "+proj=lcc +lat_1=48.25 +lat_2=49.75 +lat_0=49 +lon_0=3 +x_0=1700000 +y_0=8200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
+proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+
+const correspondanceCodes = {
+    "M": "90", "METRO": "90", "MÉTRO": "90", "TRAM": "90",
+    "T1": "91", "T2": "92", "T3": "93", "T4": "94", "T5": "95",
+    "F1": "01", "F2": "02", "F3": "03", "F4": "04", "F5": "05", "F6": "06", "F7": "07", "F8": "08",
+    "N": "98", "NOCTAMBUS": "98", "CALYPSO": "99"
+};
+
+// 🚨 LES COULEURS SUR-MESURE MYASTUCE
+const couleursPersonnalisees = {
+    "A": "rgb(205, 25, 34)",
+    "B": "rgb(35, 67, 145)",
+    "C": "rgb(0, 159, 97)",
+    "D1": "rgb(152, 194, 29)",
+    "D2": "rgb(117, 70, 45)",
+    "F": "rgb(214, 5, 111)",
+    "G": "rgb(211, 216, 0)",
+    "I": "rgb(56, 180, 182)",
+    "F9": "rgb(36, 139, 203)"
+};
+
+const nomsBannis = ["E", "H", "J", "L29", "EXTENSION"];
+
+async function chargerDonneesOfficielles() {
+    const fichiers = {
+        regulieres: 'lignes.geojson', // <-- Vérifie tes noms de fichiers
+        scolaires: 'scolaires.geojson',
+        arrets: 'arrets.geojson'
+    };
+
+    try {
+        const [resReg, resScol, resArrets] = await Promise.all([
+            fetch(fichiers.regulieres),
+            fetch(fichiers.scolaires),
+            fetch(fichiers.arrets)
+        ]);
+
+        const geoReg = await resReg.json();
+        const dataScol = await resScol.json();
+        const geoArrets = await resArrets.json();
+
+        tracesLignes = {};
+
+        // 🚨 LE CONVERTISSEUR RÉPARÉ
+        const convertirEnGps = (coord) => {
+            const lonX = parseFloat(coord[0]);
+            const latY = parseFloat(coord[1]);
+
+            if (lonX > 1000) {
+                // On utilise les définitions strictes de Proj4
+                const pt = proj4("EPSG:3949", "EPSG:4326", [lonX, latY]);
+                return [pt[1], pt[0]]; // Retourne [Lat, Lon]
+            }
+            return [latY, lonX]; // Déjà en GPS
+        };
+
+        const obtenirCodeTcar = (nomBrut) => {
+            let nomNettoye = String(nomBrut).replace(/^L/i, '').toUpperCase();
+            return "TCAR:" + (correspondanceCodes[nomNettoye] || nomNettoye);
+        };
+
+        const extraireTraces = (elements) => {
+            const liste = elements.features || elements.results || elements;
+            if (!Array.isArray(liste)) return;
+
+            liste.forEach(f => {
+                const props = f.properties || f;
+                const nomLigneBrut = props.NUM_LIGNE || props.numerolign || props.nom_ligne || props.nomcommercial;
+                const geom = f.geometry || f.geo_shape?.geometry || f.geo_shape;
+                const couleurLigne = props.COLOR_LIGN || props.couleur || "#94a3b8";
+
+                if (!nomLigneBrut || !geom) return;
+
+                const lignesTrouvees = String(nomLigneBrut).match(/[A-Za-z0-9éè]+/g) || [];
+
+                lignesTrouvees.forEach(ligneBrute => {
+                    const nomMajuscule = ligneBrute.toUpperCase();
+
+                    // On bloque les lettres bizarres
+                    if (nomsBannis.includes(nomMajuscule)) return;
+
+                    const tcarCode = obtenirCodeTcar(ligneBrute);
+
+                    // 🚨 LA MAGIE OPÈRE ICI :
+                    // On choisit ta couleur personnalisée en priorité. Si elle n'existe pas, on prend celle du fichier.
+                    const couleurFinale = couleursPersonnalisees[nomMajuscule] || couleurLigne;
+
+                    if (!infosLignes[tcarCode]) {
+                        // On enregistre la ligne avec SA bonne couleur
+                        infosLignes[tcarCode] = { nom: nomMajuscule, couleur: couleurFinale };
+                    }
+
+                    if (!tracesLignes[tcarCode]) tracesLignes[tcarCode] = [];
+
+                    if (geom.type === 'LineString') {
+                        tracesLignes[tcarCode].push(geom.coordinates.map(convertirEnGps));
+                    } else if (geom.type === 'MultiLineString') {
+                        geom.coordinates.forEach(seg => tracesLignes[tcarCode].push(seg.map(convertirEnGps)));
+                    }
+                });
+            });
+        };
+
+        extraireTraces(geoReg);
+        extraireTraces(dataScol);
+
+        // 🚨 NOUVEAU : On recolle les morceaux de routes cassés !
+        for (const code in tracesLignes) {
+            let segments = tracesLignes[code];
+            let fusionActif = true;
+            while (fusionActif) {
+                fusionActif = false;
+                for (let i = 0; i < segments.length; i++) {
+                    for (let j = i + 1; j < segments.length; j++) {
+                        const s1 = segments[i]; const s2 = segments[j];
+                        const dist = (p1, p2) => Math.abs(p1[0] - p2[0]) + Math.abs(p1[1] - p2[1]);
+                        const SEUIL = 0.0005; // ~50m
+                        if (dist(s1[s1.length - 1], s2[0]) < SEUIL) { segments[i] = s1.concat(s2.slice(1)); segments.splice(j, 1); fusionActif = true; break; }
+                        else if (dist(s1[0], s2[s2.length - 1]) < SEUIL) { segments[i] = s2.concat(s1.slice(1)); segments.splice(j, 1); fusionActif = true; break; }
+                        else if (dist(s1[s1.length - 1], s2[s2.length - 1]) < SEUIL) { segments[i] = s1.concat(s2.slice(0, -1).reverse()); segments.splice(j, 1); fusionActif = true; break; }
+                        else if (dist(s1[0], s2[0]) < SEUIL) { segments[i] = s1.slice(1).reverse().concat(s2); segments.splice(j, 1); fusionActif = true; break; }
+                    }
+                    if (fusionActif) break;
+                }
+            }
+        }
+
+        // --- ARRÊTS ---
+        reseauArrets = {};
+        const elementsArrets = geoArrets.features || geoArrets.results || [];
+        elementsArrets.forEach(f => {
+            const p = f.properties || f;
+            const g = f.geometry || f.geo_point_2d || p.geo_point_2d;
+            if (!p || !g) return;
+
+            const id = p.code || p.id || p.nom || p.nom_arret;
+            let lon = g.coordinates ? parseFloat(g.coordinates[0]) : parseFloat(g.lon || g[0]);
+            let lat = g.coordinates ? parseFloat(g.coordinates[1]) : parseFloat(g.lat || g[1]);
+
+            if (lon > 1000) {
+                const pt = proj4("EPSG:3949", "EPSG:4326", [lon, lat]);
+                lon = pt[0]; lat = pt[1];
+            }
+
+            if (id && lat && lon) {
+                reseauArrets[id] = { n: p.nom || p.nom_arret, lat: lat, lon: lon, lignes: {} };
+            }
+        });
+
+        console.log(`✅ TOUT EST CHARGÉ ! ${Object.keys(tracesLignes).length} lignes en mémoire.`);
+
+        // --- ASSOCIATION MATHÉMATIQUE : ARRÊTS <-> LIGNES (Version Branches) ---
+        for (const [idArret, arret] of Object.entries(reseauArrets)) {
+            for (const [codeTcar, branches] of Object.entries(tracesLignes)) {
+                let brancheIndex = 0;
+                for (const branche of branches) {
+                    let estSurCetteBranche = false;
+                    for (const pt of branche) {
+                        // Filtre rapide pour scanner autour de l'arrêt
+                        if (Math.abs(arret.lat - pt[0]) < 0.003 && Math.abs(arret.lon - pt[1]) < 0.003) {
+                            const dist = calculerDistanceMeters(arret.lat, arret.lon, pt[0], pt[1]);
+                            if (dist < 150) { // Tolérance de 150m pour les grands quais
+                                estSurCetteBranche = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (estSurCetteBranche) {
+                        // 🚨 MAGIE : On enregistre la ligne ET sa branche (ex: TCAR:90_branch_0)
+                        arret.lignes[`${codeTcar}_branch_${brancheIndex}`] = 1;
+                    }
+                    brancheIndex++;
+                }
+            }
+        }
+        console.log("✅ Tous les arrêts sont magnétisés sur leurs branches !");
+
+        genererMenuLignes();
+        dessinerTraces();
+
+    } catch (e) {
+        console.error("❌ Erreur de lecture interne :", e);
+    }
+}
+
+function genererMenuLignes() {
+    const grid = document.getElementById('lignes-grid');
+    grid.innerHTML = ''; // On vide le conteneur principal
+
+    const categories = {
+        1: { titre: "🚇 Métro, TEOR et Fast", div: document.createElement('div') },
+        2: { titre: "🚌 Lignes régulières", div: document.createElement('div') },
+        3: { titre: "🌙 Lignes de nuit", div: document.createElement('div') },
+        4: { titre: "🎒 Lignes scolaires", div: document.createElement('div') },
+        5: { titre: "⛴️ Navette Fluviale", div: document.createElement('div') }
+    };
+
+    for (let i = 1; i <= 5; i++) {
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'categorie-header';
+
+        const titre = document.createElement('h4');
+        titre.textContent = categories[i].titre;
+        titre.style.margin = "0";
+
+        const fleche = document.createElement('span');
+        fleche.textContent = "▼";
+        fleche.className = 'categorie-fleche';
+
+        headerDiv.appendChild(titre);
+        headerDiv.appendChild(fleche);
+        categories[i].div.appendChild(headerDiv);
+
+        const sousGrille = document.createElement('div');
+        sousGrille.className = 'sous-grille-boutons';
+        sousGrille.style.display = 'none'; // Fermé par défaut
+        categories[i].sousGrille = sousGrille;
+        categories[i].div.appendChild(sousGrille);
+
+        headerDiv.onclick = () => {
+            if (sousGrille.style.display === 'none') {
+                sousGrille.style.display = 'flex';
+                fleche.style.transform = 'rotate(180deg)';
+            } else {
+                sousGrille.style.display = 'none';
+                fleche.style.transform = 'rotate(0deg)';
+            }
+        };
+
+        grid.appendChild(categories[i].div);
+    }
+
+    // 🚨 LE TRI VIP
+    const lignesTriees = Object.entries(infosLignes).sort((a, b) => {
+        const nomA = a[1].nom.toUpperCase();
+        const nomB = b[1].nom.toUpperCase();
+
+        const getPriorite = (nom) => {
+            if (nom === "M" || nom === "METRO" || nom === "MÉTRO") return 1;
+            if (nom.startsWith("T")) return 2;
+            // Les Fast (F1 à F9), mais attention à ne pas prendre la ligne Filo'r "F"
+            if (nom.startsWith("F") && nom !== "F") return 3;
+            return 4; // Les autres
+        };
+
+        const prioA = getPriorite(nomA);
+        const prioB = getPriorite(nomB);
+
+        if (prioA !== prioB) return prioA - prioB;
+
+        return a[1].nom.localeCompare(b[1].nom, undefined, { numeric: true });
+    });
+
+    // 🚨 LE CLASSEMENT DANS LES CATÉGORIES
+    for (const [codeTcar, infos] of lignesTriees) {
+        const nom = infos.nom.toUpperCase();
+        let idCat = 2; // Catégorie par défaut : Lignes régulières
+
+        // RÈGLE 1 : Métro, TEOR, Fast (F1 à F9)
+        if (nom === "M" || nom === "METRO" || nom === "MÉTRO" || nom.startsWith("T") || (nom.startsWith("F") && nom !== "F")) {
+            idCat = 1;
+        }
+        // RÈGLE 2 : Lignes de Nuit
+        else if (nom === "N" || nom === "NOCTAMBUS") {
+            idCat = 3;
+        }
+        // RÈGLE 3 : Navette Fluviale
+        else if (nom === "CALYPSO") {
+            idCat = 5;
+        }
+        // RÈGLE 4 : Scolaires (100 et plus, SAUF 529 et 530)
+        else {
+            const num = parseInt(nom, 10);
+            if (!isNaN(num) && num >= 100 && num !== 529 && num !== 530) {
+                idCat = 4;
+            }
+            // Tout le reste (A, B, C, F, G, I, D1, D2, 529, 530...) tombe par défaut dans idCat = 2 (Régulières)
+        }
+
+        const btn = document.createElement('button');
+        btn.className = 'ligne-btn';
+        btn.textContent = infos.nom;
+        btn.style.borderColor = infos.couleur;
+        btn.style.color = infos.couleur;
+
+        btn.onclick = () => {
+            if (lignesFiltrees.has(codeTcar)) {
+                lignesFiltrees.delete(codeTcar);
+                btn.style.backgroundColor = "transparent";
+                btn.style.color = infos.couleur;
+            } else {
+                lignesFiltrees.add(codeTcar);
+                btn.style.backgroundColor = infos.couleur;
+                btn.style.color = "white";
+            }
+            chargerPositionsBus();
+            dessinerTraces();
+        };
+
+        categories[idCat].sousGrille.appendChild(btn);
+    }
+}
+
+// === CONFIGURATION DU CONVERTISSEUR (CC49 vers GPS) ===
+// On définit le système de la Métropole de Rouen (CC49)
+const CC49 = "+proj=lcc +lat_1=48.25 +lat_2=49.75 +lat_0=49 +lon_0=3 +x_0=1700000 +y_0=8200000 +ellps=GRS80 +units=m +no_defs";
+const WGS84 = "EPSG:4326"; // Le système GPS standard
+
+map.on('load', async () => {
+    // On appelle la bonne fonction (Celle qui lit n'importe quel fichier)
+    await chargerDonneesOfficielles();
+
     chargerPositionsBus();
-    chargerInfoTrafic(); // NOUVEAUTÉ : On charge les alertes !
+    chargerInfoTrafic();
 
     setInterval(chargerPositionsBus, 20000);
-    setInterval(chargerInfoTrafic, 300000); // On rafraîchit l'info-trafic toutes les 5 minutes (300 000 ms)
+    setInterval(chargerInfoTrafic, 300000);
 });
 
 const MAPTILER_KEY = 'IVox3aAq7YDuFvXSXXu8';
@@ -474,81 +843,82 @@ function chercherProchainBus(routeIdToFind, stopIdToFind) {
     });
     return meilleurPassage;
 }
+function formaterInfoLive(infoLive, nomLigne) {
+    if (infoLive && infoLive.minutes !== undefined) {
+        let texteRetard = infoLive.retard > 0 ? `<span style='color:#ef4444'>(+${infoLive.retard} min)</span>` : `<span style='color:#10b981'>(À l'heure)</span>`;
+        return `<div style='color: #ea580c; font-weight: bold; font-size: 12px; margin-top: 5px; background: #fff7ed; padding: 4px 8px; border-radius: 4px; border: 1px solid #fed7aa;'>📡 En direct : ~${infoLive.minutes} min ${texteRetard}</div>`;
+    } else {
+        // --- LE PLAN B (FICHE HORAIRE DE SECOURS) ---
+        let prochainHoraire = null;
+        const maintenant = new Date();
+        const h = maintenant.getHours();
+        const m = maintenant.getMinutes();
 
-// Outil 2 : Mettre ça en forme proprement pour l'affichage
-function formaterInfoLive(infoLive) {
-    if (!infoLive) return "<div style='color: #94a3b8; font-size: 11px; margin-top: 5px;'><i>📡 Aucun bus en approche détecté</i></div>";
+        // Horaires statiques basés sur la documentation officielle
+        if (nomLigne.includes("Métro") || nomLigne.includes("M")) {
+            if (h === 21 && m <= 50) prochainHoraire = "21h50";
+            else if (h === 22 && m <= 21) prochainHoraire = "22h21";
+            else if (h === 22 && m <= 50) prochainHoraire = "22h50";
+            else if (h === 23 && m <= 20) prochainHoraire = "23h20";
+            else prochainHoraire = "23h50";
+        }
+        else if (nomLigne.includes("F6")) {
+            if (h === 22 && m <= 11) prochainHoraire = "22h11";
+            else if ((h === 22 && m > 11) || (h === 23 && m <= 7)) prochainHoraire = "23h07";
+        }
 
-    let texteRetard = "";
-    if (infoLive.retard > 0) texteRetard = `<span style='color:#ef4444'>(+${infoLive.retard} min)</span>`;
-    else if (infoLive.retard < 0) texteRetard = `<span style='color:#10b981'>(${infoLive.retard} min)</span>`;
-    else texteRetard = `<span style='color:#10b981'>(À l'heure)</span>`;
+        if (prochainHoraire) {
+            return `<div style='color: #475569; font-weight: bold; font-size: 12px; margin-top: 5px; background: #f8fafc; padding: 4px 8px; border-radius: 4px; border: 1px solid #cbd5e1;'>📅 Fiche horaire : Prochain à ${prochainHoraire}</div>`;
+        }
 
-    return `<div style='color: #ea580c; font-weight: bold; font-size: 12px; margin-top: 5px; background: #fff7ed; padding: 4px 8px; border-radius: 4px; display: inline-block; border: 1px solid #fed7aa;'>📡 Arrive dans ~${infoLive.minutes} min ${texteRetard}</div>`;
+        return "<div style='color: #94a3b8; font-size: 11px; margin-top: 5px;'><i>🌙 Fin de service</i></div>";
+    }
 }
 
+// === MOTEUR DE CALCUL MULTI-ITINÉRAIRES (AVEC TEMPS RÉEL INTÉGRÉ) ===
 async function lancerCalcul(mode) {
     nettoyerAncienTrajet();
 
     const txtDepart = document.getElementById('input-depart').value;
     const txtArrivee = document.getElementById('input-arrivee').value;
 
-    if (!txtDepart || !txtArrivee) {
-        return alert("Veuillez indiquer un départ et une arrivée.");
-    }
+    if (!txtDepart || !txtArrivee) return alert("Veuillez indiquer un départ et une arrivée.");
 
-    let coordsDep;
-    if (txtDepart === "📍 Ma position" && coordsMaPosition) {
-        coordsDep = coordsMaPosition;
-    } else {
-        coordsDep = await geocoderAdresse(txtDepart);
-    }
+    let coordsDep = (txtDepart === "📍 Ma position" && coordsMaPosition) ? coordsMaPosition : await geocoderAdresse(txtDepart);
     const coordsArr = await geocoderAdresse(txtArrivee);
 
-    if (!coordsDep || !coordsArr) {
-        return alert("Impossible de trouver ces adresses sur la carte.");
-    }
+    if (!coordsDep || !coordsArr) return alert("Impossible de trouver ces adresses sur la carte.");
 
     if (mode === 'transit') {
-        const RAYON_RECHERCHE = 1500;
+        const RAYON_RECHERCHE = 2500;
         let arretsDepart = [];
         let arretsArrivee = [];
 
-        // 1. Chercher les arrêts
         for (const [id, arret] of Object.entries(reseauArrets)) {
             if (!arret.lat || arret.lat === 0) continue;
             const distDep = calculerDistanceMeters(coordsDep[1], coordsDep[0], arret.lat, arret.lon);
-            if (distDep <= RAYON_RECHERCHE) arretsDepart.push({ id: id, ...arret, distDep });
+            if (distDep <= RAYON_RECHERCHE) arretsDepart.push({ id, ...arret, distDep });
 
             const distArr = calculerDistanceMeters(coordsArr[1], coordsArr[0], arret.lat, arret.lon);
-            if (distArr <= RAYON_RECHERCHE) arretsArrivee.push({ id: id, ...arret, distArr });
+            if (distArr <= RAYON_RECHERCHE) arretsArrivee.push({ id, ...arret, distArr });
         }
 
         if (arretsDepart.length === 0 || arretsArrivee.length === 0) return alert("Aucun arrêt trouvé à proximité.");
 
-        // === OPTIMISATION 1 : Le Filtre Entonnoir (Le secret de la vitesse) ===
-        // On trie par distance et on ne garde QUE les 15 plus proches. Ça évite les millions de calculs !
-        arretsDepart.sort((a, b) => a.distDep - b.distDep);
-        arretsDepart = arretsDepart.slice(0, 15);
+        arretsDepart.sort((a, b) => a.distDep - b.distDep); arretsDepart = arretsDepart.slice(0, 15);
+        arretsArrivee.sort((a, b) => a.distArr - b.distArr); arretsArrivee = arretsArrivee.slice(0, 15);
 
-        arretsArrivee.sort((a, b) => a.distArr - b.distArr);
-        arretsArrivee = arretsArrivee.slice(0, 15);
-
-        // === OPTIMISATION 2 : L'Annuaire des Lignes ===
-        // On classe instantanément les arrêts par ligne pour ne plus jamais chercher à l'aveugle
         const arretsParLigne = {};
         for (const [id, arret] of Object.entries(reseauArrets)) {
             if (!arret.lat || arret.lat === 0) continue;
             for (const [ligne, indexLigne] of Object.entries(arret.lignes)) {
                 if (!arretsParLigne[ligne]) arretsParLigne[ligne] = [];
-                arretsParLigne[ligne].push({ id: id, ...arret, idx: indexLigne });
+                arretsParLigne[ligne].push({ id, ...arret, idx: indexLigne });
             }
         }
 
-        let meilleurTrajet = null;
-        let tempsMin = Infinity;
+        let trajetsPossibles = [];
 
-        // 3. Boucle principale (Maintenant ultra-rapide)
         for (const dep of arretsDepart) {
             for (const arr of arretsArrivee) {
                 if (dep.n === arr.n) continue;
@@ -556,65 +926,90 @@ async function lancerCalcul(mode) {
                 const lignesDep = Object.keys(dep.lignes);
                 const lignesArr = Object.keys(arr.lignes);
 
+                const lignesCommunes = lignesDep.filter(p => lignesArr.includes(p));
+
+                // 🚨 LES NOUVELLES RÈGLES DE RÉALISME 🚨
+                const VITESSE_MARCHE = 55;     // 55 m/min = Allure tranquille en ville
+                const VITESSE_TRANSPORT = 300; // 300 m/min = ~18 km/h en moyenne commerciale
+                const TEMPS_ACCES = 2;         // +2 min pour sortir du bâtiment / descendre sur le quai
+
                 // --- A. TRAJET DIRECT ---
-                const lignesCommunes = lignesDep.filter(p => lignesArr.includes(p) && dep.lignes[p] < arr.lignes[p]);
-
                 if (lignesCommunes.length > 0) {
-                    const distBus = calculerDistanceMeters(dep.lat, dep.lon, arr.lat, arr.lon);
-                    const tMarche1 = Math.max(1, Math.round(dep.distDep / 80));
-                    const tBus = Math.max(1, Math.round(distBus / 330));
-                    const tMarche2 = Math.max(1, Math.round(arr.distArr / 80));
-                    const tTotal = tMarche1 + tBus + tMarche2;
+                    const ligneComplete = lignesCommunes[0];
+                    const baseLigne = ligneComplete.split('_branch_')[0];
 
-                    if (tTotal < tempsMin) {
-                        tempsMin = tTotal;
-                        meilleurTrajet = { type: 'direct', dep, arr, ligne: lignesCommunes[0], tMarche1, tBus, tMarche2, tTotal };
+                    const distBus = calculerDistanceMeters(dep.lat, dep.lon, arr.lat, arr.lon);
+
+                    // Nouveaux calculs humains
+                    const tMarche1 = Math.max(1, Math.round(dep.distDep / VITESSE_MARCHE) + TEMPS_ACCES);
+                    const tBus = Math.max(1, Math.round(distBus / VITESSE_TRANSPORT));
+                    const tMarche2 = Math.max(1, Math.round(arr.distArr / VITESSE_MARCHE) + TEMPS_ACCES);
+
+                    const infoLive = chercherProchainBus(baseLigne, dep.id);
+                    let attente = 5;
+                    if (infoLive) {
+                        if (infoLive.minutes >= tMarche1) {
+                            attente = infoLive.minutes - tMarche1;
+                        } else {
+                            attente = 10;
+                        }
                     }
+
+                    const tTotal = tMarche1 + attente + tBus + tMarche2;
+
+                    trajetsPossibles.push({ type: 'direct', dep, arr, ligne: ligneComplete, tMarche1, attente, tBus, tMarche2, tTotal });
                 }
-                // --- B. 1 CORRESPONDANCE ---
+                // --- B. CORRESPONDANCE ---
                 else {
                     for (const l1 of lignesDep) {
-                        const idxDep = dep.lignes[l1];
-                        // On ne regarde QUE les arrêts qui sont APRÈS notre point de départ sur cette ligne
-                        const pivotsPossibles1 = arretsParLigne[l1].filter(a => a.idx > idxDep);
-
+                        const pivotsPossibles1 = arretsParLigne[l1] || [];
                         for (const l2 of lignesArr) {
-                            const idxArr = arr.lignes[l2];
-                            // On ne regarde QUE les arrêts qui sont AVANT notre arrivée sur cette ligne
-                            const pivotsPossibles2 = arretsParLigne[l2].filter(a => a.idx < idxArr);
+                            const pivotsPossibles2 = arretsParLigne[l2] || [];
 
                             for (const p1 of pivotsPossibles1) {
                                 for (const p2 of pivotsPossibles2) {
-                                    // Ignorer les arrêts inutiles
                                     if (p1.n === dep.n || p2.n === arr.n) continue;
-
-                                    // Filtre géométrique hyper-rapide (un carré de recherche brut)
                                     if (Math.abs(p1.lat - p2.lat) > 0.008 || Math.abs(p1.lon - p2.lon) > 0.008) continue;
 
-                                    // La vraie distance mathématique précise
-                                    const distTransfert = (p1.id === p2.id) ? 0 : calculerDistanceMeters(p1.lat, p1.lon, p2.lat, p2.lon);
+                                    const memeStation = (p1.n === p2.n);
+                                    const distTransfert = memeStation ? 0 : calculerDistanceMeters(p1.lat, p1.lon, p2.lat, p2.lon);
 
-                                    // Si on peut changer de quai avec max 600m de marche
-                                    if (distTransfert <= 600) {
+                                    if (distTransfert <= 400 || memeStation) {
+                                        const baseLigne1 = l1.split('_branch_')[0];
+
                                         const distBus1 = calculerDistanceMeters(dep.lat, dep.lon, p1.lat, p1.lon);
                                         const distBus2 = calculerDistanceMeters(p2.lat, p2.lon, arr.lat, arr.lon);
 
-                                        const tMarche1 = Math.max(1, Math.round(dep.distDep / 80));
-                                        const tBus1 = Math.max(1, Math.round(distBus1 / 330));
-                                        const tCorresp = Math.max(3, Math.round(distTransfert / 80) + 3);
-                                        const tBus2 = Math.max(1, Math.round(distBus2 / 330));
-                                        const tMarche2 = Math.max(1, Math.round(arr.distArr / 80));
-                                        const tTotal = tMarche1 + tBus1 + tCorresp + tBus2 + tMarche2;
+                                        // Nouveaux calculs humains
+                                        const tMarche1 = Math.max(1, Math.round(dep.distDep / VITESSE_MARCHE) + TEMPS_ACCES);
 
-                                        if (tTotal < tempsMin) {
-                                            tempsMin = tTotal;
-                                            meilleurTrajet = {
-                                                type: 'correspondance', dep, arr,
-                                                pivot: p1, pivot2: p2,
-                                                ligne1: l1, ligne2: l2,
-                                                tMarche1, tBus1, tCorresp, tBus2, tMarche2, tTotal
-                                            };
+                                        const infoLive1 = chercherProchainBus(baseLigne1, dep.id);
+                                        let attente1 = 5;
+                                        if (infoLive1) {
+                                            if (infoLive1.minutes >= tMarche1) attente1 = infoLive1.minutes - tMarche1;
+                                            else attente1 = 10;
                                         }
+
+                                        const tBus1 = Math.max(1, Math.round(distBus1 / VITESSE_TRANSPORT));
+
+                                        const penaliteMarche = memeStation ? 0 : 10;
+
+                                        // On ralentit aussi la marche pendant la correspondance (et on ajoute 2 min d'orientation)
+                                        const tMarcheTransfert = Math.max(3, Math.round(distTransfert / VITESSE_MARCHE) + 2);
+                                        const attenteCorresp = 6;
+
+                                        const tCorresp = tMarcheTransfert + penaliteMarche + attenteCorresp;
+                                        const tBus2 = Math.max(1, Math.round(distBus2 / VITESSE_TRANSPORT));
+
+                                        const tMarche2 = Math.max(1, Math.round(arr.distArr / VITESSE_MARCHE) + TEMPS_ACCES);
+
+                                        const tTotal = tMarche1 + attente1 + tBus1 + tCorresp + tBus2 + tMarche2;
+
+                                        trajetsPossibles.push({
+                                            type: 'correspondance', dep, arr, pivot: p1, pivot2: p2, ligne1: l1, ligne2: l2,
+                                            tMarche1, attente1, tBus1, tCorresp: tMarcheTransfert + attenteCorresp,
+                                            tBus2, tMarche2, tTotal: (tTotal - penaliteMarche)
+                                        });
                                     }
                                 }
                             }
@@ -624,89 +1019,149 @@ async function lancerCalcul(mode) {
             }
         }
 
-        // === L'AFFICHAGE DU RÉSULTAT COMMENCE ICI ===
-        if (meilleurTrajet) {
-            const conteneurResultat = document.getElementById('resultats-it');
-            const parserLigne = (ligneBrute) => {
-                const parts = ligneBrute.split('::');
-                const baseId = parts[0];
-                const direction = parts[1] ? `vers ${parts[1]}` : '';
-                const info = infosLignes[baseId] || { nom: baseId.replace('TCAR:', ''), couleur: '#333' };
-                return { baseId, direction, nom: info.nom, couleur: info.couleur };
-            };
+        if (trajetsPossibles.length === 0) return alert("Aucun itinéraire trouvé.");
 
-            let htmlResultat = "";
-            if (meilleurTrajet.type === 'direct') {
-                const l = parserLigne(meilleurTrajet.ligne);
+        trajetsPossibles.sort((a, b) => a.tTotal - b.tTotal);
 
-                // MAGIE : Appel temps réel pour le bus direct !
-                const infoLive = chercherProchainBus(l.baseId, meilleurTrajet.dep.id);
-                const htmlLive = formaterInfoLive(infoLive);
-
-                htmlResultat = `<div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin-top: 15px;"><h4 style="margin: 0 0 10px 0;">Durée : ~${meilleurTrajet.tTotal} min (Direct)</h4><div style="display: flex; gap: 10px; margin-bottom: 8px;">🚶 <span>Marche <b>${meilleurTrajet.tMarche1} min</b> jusqu'à <b>${meilleurTrajet.dep.n}</b></span></div><div style="display: flex; gap: 10px; border-left: 3px solid ${l.couleur}; padding-left: 10px;"><span style="background: ${l.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content;">${l.nom}</span><span>Trajet ~<b>${meilleurTrajet.tBus} min</b> ${l.direction}<br>Descendre à <b>${meilleurTrajet.arr.n}</b><br>${htmlLive}</span></div><div style="display: flex; gap: 10px; margin-top: 8px;">🚶 <span>Marche <b>${meilleurTrajet.tMarche2} min</b> jusqu'à l'arrivée</span></div></div>`;
-            } else {
-                const l1 = parserLigne(meilleurTrajet.ligne1);
-                const l2 = parserLigne(meilleurTrajet.ligne2);
-
-                // MAGIE : Appel temps réel pour les DEUX bus !
-                const infoLive1 = chercherProchainBus(l1.baseId, meilleurTrajet.dep.id);
-                const infoLive2 = chercherProchainBus(l2.baseId, meilleurTrajet.pivot2.id);
-
-                const mentionMarcheTransfert = (meilleurTrajet.pivot.n !== meilleurTrajet.pivot2.n) ? ` (vers ${meilleurTrajet.pivot2.n})` : '';
-
-                htmlResultat = `<div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin-top: 15px;"><h4 style="margin: 0 0 10px 0;">Durée : ~${meilleurTrajet.tTotal} min (Correspondance)</h4><div style="display: flex; gap: 10px; margin-bottom: 8px;">🚶 <span>Marche <b>${meilleurTrajet.tMarche1} min</b> jusqu'à <b>${meilleurTrajet.dep.n}</b></span></div><div style="display: flex; gap: 10px; border-left: 3px solid ${l1.couleur}; padding-left: 10px;"><span style="background: ${l1.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content;">${l1.nom}</span><span>Trajet ~<b>${meilleurTrajet.tBus1} min</b> ${l1.direction}<br>Descendre à <b>${meilleurTrajet.pivot.n}</b><br>${formaterInfoLive(infoLive1)}</span></div><div style="margin: 8px 0; padding-left: 15px;">🔄 Transfert ~<b>${meilleurTrajet.tCorresp} min</b>${mentionMarcheTransfert}</div><div style="display: flex; gap: 10px; border-left: 3px solid ${l2.couleur}; padding-left: 10px;"><span style="background: ${l2.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content;">${l2.nom}</span><span>Trajet ~<b>${meilleurTrajet.tBus2} min</b> ${l2.direction}<br>Descendre à <b>${meilleurTrajet.arr.n}</b><br>${formaterInfoLive(infoLive2)}</span></div><div style="display: flex; gap: 10px; margin-top: 8px;">🚶 <span>Marche <b>${meilleurTrajet.tMarche2} min</b> jusqu'à l'arrivée</span></div></div>`;
+        let trajetsUniques = [];
+        let signaturesVues = new Set();
+        for (const t of trajetsPossibles) {
+            const sig = t.type === 'direct' ? `${t.ligne.split('_branch_')[0]}_${t.dep.n}` : `${t.ligne1.split('_branch_')[0]}_${t.ligne2.split('_branch_')[0]}_${t.pivot.n}`;
+            if (!signaturesVues.has(sig)) {
+                signaturesVues.add(sig);
+                trajetsUniques.push(t);
+                if (trajetsUniques.length === 3) break;
             }
-            if (conteneurResultat) conteneurResultat.innerHTML = htmlResultat;
+        }
 
-            document.getElementById('btn-effacer-it').style.display = 'block';
-            document.getElementById('btn-demarrer-it').style.display = 'block';
+        const conteneurResultat = document.getElementById('resultats-it');
+        conteneurResultat.innerHTML = '<h4 style="margin: 15px 0 10px 0; color: #334155;">Options suggérées :</h4>';
 
-            await dessinerItineraireTransit(meilleurTrajet, coordsDep, coordsArr);
+        const parserLigne = (ligneBrute) => {
+            const baseId = ligneBrute.split('_branch_')[0];
+            const info = infosLignes[baseId] || { nom: baseId.replace('TCAR:', ''), couleur: '#333' };
+            return { baseId, nom: info.nom, couleur: info.couleur };
+        };
+
+        const activerTrajetSurCarte = async (trajet, divElement) => {
+            document.querySelectorAll('.carte-trajet-option').forEach(el => {
+                el.style.border = '1px solid #cbd5e1';
+                el.style.boxShadow = 'none';
+            });
+            divElement.style.border = '2px solid #3b82f6';
+            divElement.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+
+            marqueursItineraire.forEach(m => m.remove());
+            marqueursItineraire = [];
+
+            await dessinerItineraireTransit(trajet, coordsDep, coordsArr);
 
             ajouterDrapeau(coordsDep, '🏠', "Votre départ");
-            // On récupère l'ID de la ligne (directe ou correspondance)
-            // Détermination de l'icône du drapeau
-            const idLigneTrajet = meilleurTrajet.type === 'direct' ? meilleurTrajet.ligne.split('::')[0] : meilleurTrajet.ligne1.split('::')[0];
-            let iconeDrapeau = '🚌';
+            const idLigneTrajet = trajet.type === 'direct' ? trajet.ligne.split('_branch_')[0] : trajet.ligne1.split('_branch_')[0];
+            let iconeDrapeau = (idLigneTrajet === 'TCAR:90') ? '🚇' : `<div class="line-badge-icon" style="background-color:${infosLignes[idLigneTrajet]?.couleur || '#333'}; width:24px; height:24px; font-size:10px;">${infosLignes[idLigneTrajet]?.nom || '🚌'}</div>`;
+            ajouterDrapeau([trajet.dep.lon, trajet.dep.lat], iconeDrapeau, `Monter à : ${trajet.dep.n}`);
 
-            if (idLigneTrajet === 'TCAR:90') {
-                iconeDrapeau = '🚇';
-            } else if (['TCAR:91', 'TCAR:92', 'TCAR:93', 'TCAR:94'].includes(idLigneTrajet)) {
-                const info = infosLignes[idLigneTrajet];
-                // On crée un petit badge HTML pour le drapeau aussi !
-                iconeDrapeau = `<div class="line-badge-icon" style="background-color:${info.couleur}; width:24px; height:24px; font-size:10px;">${info.nom}</div>`;
-            }
+            tripsItineraire.clear(); modeItineraireActif = true;
 
-            ajouterDrapeau([meilleurTrajet.dep.lon, meilleurTrajet.dep.lat], iconeDrapeau, `Monter à : ${meilleurTrajet.dep.n}`);
-
-            // === ISOLER LE(S) VÉHICULE(S) EXACT(S) ===
-            tripsItineraire.clear();
-            modeItineraireActif = true; // On bloque les autres bus
-
-            if (meilleurTrajet.type === 'direct') {
-                if (infoLive && infoLive.tripId) tripsItineraire.add(infoLive.tripId);
+            if (trajet.type === 'direct') {
+                const live = chercherProchainBus(trajet.ligne.split('_branch_')[0], trajet.dep.id);
+                if (live && live.tripId) tripsItineraire.add(live.tripId);
             } else {
-                if (infoLive1 && infoLive1.tripId) tripsItineraire.add(infoLive1.tripId);
-                if (infoLive2 && infoLive2.tripId) tripsItineraire.add(infoLive2.tripId);
+                const live1 = chercherProchainBus(trajet.ligne1.split('_branch_')[0], trajet.dep.id);
+                if (live1 && live1.tripId) tripsItineraire.add(live1.tripId);
+                const live2 = chercherProchainBus(trajet.ligne2.split('_branch_')[0], trajet.pivot2.id);
+                if (live2 && live2.tripId) tripsItineraire.add(live2.tripId);
             }
 
-            // On cache les gros tracés du menu pour ne laisser que le bel itinéraire découpé
             if (map.getSource('traces')) map.getSource('traces').setData({ type: 'FeatureCollection', features: [] });
-
-            // On met à jour la carte avec les bons bus !
             chargerPositionsBus();
 
             const limites = new maplibregl.LngLatBounds();
-            limites.extend(coordsDep);
-            limites.extend(coordsArr);
+            limites.extend(coordsDep); limites.extend(coordsArr);
             map.fitBounds(limites, { padding: 60, pitch: 50 });
-        } else {
-            alert("Aucun itinéraire trouvé.");
-        }
+        };
+
+        trajetsUniques.forEach((trajet, index) => {
+            const divTrajet = document.createElement('div');
+            divTrajet.className = 'carte-trajet-option';
+            divTrajet.style.cssText = `background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s ease;`;
+
+            // --- NOUVEAU : CALCULS DES STATISTIQUES PREMIUM ---
+            // 1. Les calories (basées sur le temps de marche total)
+            const tempsMarcheTotal = trajet.tMarche1 + trajet.tMarche2;
+            const kcal = Math.round(tempsMarcheTotal * 4.5);
+
+            // 2. Le CO2 (basé sur la distance estimée en transport)
+            const tempsBusTotal = trajet.type === 'direct' ? trajet.tBus : (trajet.tBus1 + trajet.tBus2);
+            const distTransportKm = (tempsBusTotal * 330) / 1000; // 330 mètres par minute en moyenne
+            const co2 = Math.round(distTransportKm * 72); // 72g par km
+
+            // 3. Le Footer HTML avec les badges
+            const htmlFooterPremium = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding-top: 12px; border-top: 1px dashed #cbd5e1; font-size: 13px; color: #64748b;">
+                    <div style="display: flex; gap: 15px;">
+                        <span title="Bilan Carbone (Émissions estimées)" style="display:flex; align-items:center; gap:4px; color: #10b981; font-weight: bold;">
+                            🌱 ${co2}g CO₂
+                        </span>
+                        <span title="Bilan Santé (Calories brûlées en marchant)" style="display:flex; align-items:center; gap:4px; color: #ea580c; font-weight: bold;">
+                            🔥 ${kcal} kcal
+                        </span>
+                    </div>
+                    <div style="font-weight: bold; color: #0f172a; background: #f1f5f9; padding: 4px 8px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                        🎫 1,80 €
+                    </div>
+                </div>`;
+            // --------------------------------------------------
+
+            let htmlDetails = "";
+            if (trajet.type === 'direct') {
+                const l = parserLigne(trajet.ligne);
+                const infoLive = chercherProchainBus(l.baseId, trajet.dep.id);
+                htmlDetails = `<h4 style="margin: 0 0 10px 0; color:#0f172a;">⏱️ ~${trajet.tTotal} min</h4>
+    <div style="display: flex; gap: 10px; margin-bottom: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche1} min</b> jusqu'à <b>${trajet.dep.n}</b></span></div>
+    <div style="display: flex; gap: 10px; border-left: 3px solid ${l.couleur}; padding-left: 10px; font-size:14px;">
+    <span style="background: ${l.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content; font-weight:bold;">${l.nom}</span>
+    <span>Attente + Trajet ~<b>${trajet.attente + trajet.tBus} min</b><br>Descendre à <b>${trajet.arr.n}</b><br>${formaterInfoLive(infoLive, l.nom)}</span>
+    </div>
+    <div style="display: flex; gap: 10px; margin-top: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche2} min</b> jusqu'à l'arrivée</span></div>
+    ${htmlFooterPremium}`; // Injection du footer premium
+            } else {
+                const l1 = parserLigne(trajet.ligne1);
+                const l2 = parserLigne(trajet.ligne2);
+                const infoLive1 = chercherProchainBus(l1.baseId, trajet.dep.id);
+                const infoLive2 = chercherProchainBus(l2.baseId, trajet.pivot2.id);
+                const textCorresp = trajet.pivot.n === trajet.pivot2.n ? `🔄 Quai à quai + Attente (~${trajet.tCorresp} min)` : `🔄 Transfert vers ${trajet.pivot2.n} (~${trajet.tCorresp} min)`;
+
+                htmlDetails = `<h4 style="margin: 0 0 10px 0; color:#0f172a;">⏱️ ~${trajet.tTotal} min <span style="font-size:12px; font-weight:normal; color:#64748b;">(1 Corresp.)</span></h4>
+    <div style="display: flex; gap: 10px; margin-bottom: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche1} min</b> jusqu'à <b>${trajet.dep.n}</b></span></div>
+    <div style="display: flex; gap: 10px; border-left: 3px solid ${l1.couleur}; padding-left: 10px; font-size:14px;">
+        <span style="background: ${l1.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content; font-weight:bold;">${l1.nom}</span>
+        <span>Attente + Trajet ~<b>${trajet.attente1 + trajet.tBus1} min</b><br>Descendre à <b>${trajet.pivot.n}</b><br>${formaterInfoLive(infoLive1, l1.nom)}</span>
+    </div>
+    <div style="margin: 8px 0; padding-left: 15px; font-size:13px; color:#ea580c; font-weight:bold;">${textCorresp}</div>
+    <div style="display: flex; gap: 10px; border-left: 3px solid ${l2.couleur}; padding-left: 10px; font-size:14px;">
+        <span style="background: ${l2.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content; font-weight:bold;">${l2.nom}</span>
+        <span>Trajet ~<b>${trajet.tBus2} min</b><br>Descendre à <b>${trajet.arr.n}</b><br>${formaterInfoLive(infoLive2, l2.nom)}</span>
+    </div>
+    <div style="display: flex; gap: 10px; margin-top: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche2} min</b> jusqu'à l'arrivée</span></div>
+    ${htmlFooterPremium}`; // Injection du footer premium
+            }
+
+            divTrajet.innerHTML = htmlDetails;
+
+            divTrajet.addEventListener('click', () => activerTrajetSurCarte(trajet, divTrajet));
+            conteneurResultat.appendChild(divTrajet);
+
+            if (index === 0) {
+                activerTrajetSurCarte(trajet, divTrajet);
+                document.getElementById('btn-effacer-it').style.display = 'block';
+                document.getElementById('btn-demarrer-it').style.display = 'block';
+            }
+        });
+
         return;
     }
 
-    // === CALCUL POUR LA MARCHE OU LA VOITURE (OSRM) ===
     const profilOsrm = (mode === 'marche') ? 'foot' : 'driving';
     document.getElementById('btn-effacer-it').style.display = 'block';
     document.getElementById('btn-demarrer-it').style.display = 'block';
@@ -718,28 +1173,15 @@ async function lancerCalcul(mode) {
         if (data.routes && data.routes.length > 0) {
             const tracéGeom = data.routes[0].geometry;
             dessinerLigneItineraire(tracéGeom);
-
-            // === NOUVEAUTÉ : ON CACHE TOUS LES BUS ET LES LIGNES ===
-            modeItineraireActif = true;
-            tripsItineraire.clear(); // La liste est vide : AUCUN bus ne sera affiché !
-
-            // On cache les grosses lignes du menu si elles étaient allumées
+            modeItineraireActif = true; tripsItineraire.clear();
             if (map.getSource('traces')) map.getSource('traces').setData({ type: 'FeatureCollection', features: [] });
-
-            // On force la mise à jour (ça va faire disparaître tous les bus)
             chargerPositionsBus();
-            // ========================================================
-
             const limites = new maplibregl.LngLatBounds();
             tracéGeom.coordinates.forEach(coord => limites.extend(coord));
             map.fitBounds(limites, { padding: 50, pitch: 45 });
-        } else {
-            alert("Aucun itinéraire trouvé.");
-        }
-    } catch (e) {
-        alert("Erreur lors du calcul.");
-    }
-} // <-- Fin de la fonction lancerCalcul
+        } else alert("Aucun itinéraire trouvé.");
+    } catch (e) { alert("Erreur lors du calcul."); }
+}
 
 document.getElementById('btn-marche').addEventListener('click', () => lancerCalcul('marche'));
 document.getElementById('btn-voiture').addEventListener('click', () => lancerCalcul('voiture'));
@@ -849,7 +1291,7 @@ function nettoyerAncienTrajet() {
 
     if (map.getLayer('itineraire-layer')) map.removeLayer('itineraire-layer');
     if (map.getSource('itineraire')) map.removeSource('itineraire');
-    
+
     // On nettoie aussi l'isochrone
     if (map.getLayer('isochrone-fill')) map.removeLayer('isochrone-fill');
     if (map.getLayer('isochrone-outline')) map.removeLayer('isochrone-outline');
@@ -860,100 +1302,83 @@ function nettoyerAncienTrajet() {
     if (map.getSource('itineraire-transit')) map.removeSource('itineraire-transit');
 }
 
-// === DESSINATEUR DE SEGMENTS D'ITINÉRAIRE (VERSION RUES RÉELLES) ===
+// === DESSINATEUR D'ITINÉRAIRE (RÉPARÉ POUR LES RUES) ===
 async function dessinerItineraireTransit(trajet, coordsDep, coordsArr) {
     let features = [];
 
-    // --- OUTIL 1 : Aller chercher le vrai chemin piéton sur OSRM ---
     const obtenirCheminMarche = async (c1, c2) => {
         const url = `https://router.project-osrm.org/route/v1/foot/${c1[0]},${c1[1]};${c2[0]},${c2[1]}?geometries=geojson`;
         try {
             const res = await fetch(url);
             const data = await res.json();
-            if (data.routes && data.routes.length > 0) {
-                return data.routes[0].geometry.coordinates;
-            }
-        } catch (e) { console.error("Erreur marche OSRM:", e); }
-        return [c1, c2]; // Si erreur, on remet la ligne droite par sécurité
+            if (data.routes && data.routes.length > 0) return data.routes[0].geometry.coordinates;
+        } catch (e) { console.error("Erreur marche:", e); }
+        return [c1, c2];
     };
 
-    // --- OUTIL 2 : Découper la ligne de bus (inchangé) ---
-    const ajouterBus = (routeId, lat1, lon1, lat2, lon2, couleur) => {
+    // 🚨 LE TRACEUR CORRIGÉ ICI 🚨
+    const ajouterBus = (routeIdComplet, lat1, lon1, lat2, lon2, couleur) => {
+        const routeId = routeIdComplet.split('_branch_')[0];
         const branches = tracesLignes[routeId];
         if (!branches) return;
+
         let meilleurSegment = [];
-        let distMin = Infinity;
+        let distGlobaleMin = Infinity;
+
         branches.forEach(branche => {
-            let i1 = 0, i2 = 0, d1 = Infinity, d2 = Infinity;
+            let idx1 = -1, idx2 = -1;
+            let d1 = Infinity, d2 = Infinity;
+
             for (let i = 0; i < branche.length; i++) {
                 const distDep = calculerDistanceMeters(lat1, lon1, branche[i][0], branche[i][1]);
-                if (distDep < d1) { d1 = distDep; i1 = i; }
+                if (distDep < d1) { d1 = distDep; idx1 = i; }
+
                 const distArr = calculerDistanceMeters(lat2, lon2, branche[i][0], branche[i][1]);
-                if (distArr < d2) { d2 = distArr; i2 = i; }
+                if (distArr < d2) { d2 = distArr; idx2 = i; }
             }
-            if (d1 + d2 < distMin) {
-                distMin = d1 + d2;
-                const start = Math.min(i1, i2);
-                const end = Math.max(i1, i2);
+
+            if (d1 < 300 && d2 < 300 && (d1 + d2) < distGlobaleMin) {
+                distGlobaleMin = d1 + d2;
+                const start = Math.min(idx1, idx2);
+                const end = Math.max(idx1, idx2);
                 meilleurSegment = branche.slice(start, end + 1).map(pt => [pt[1], pt[0]]);
             }
         });
-        if (meilleurSegment.length > 0) {
-            features.push({
-                type: 'Feature',
-                properties: { color: couleur, dashed: false },
-                geometry: { type: 'LineString', coordinates: meilleurSegment }
-            });
+
+        if (meilleurSegment.length > 1) {
+            features.push({ type: 'Feature', properties: { color: couleur, dashed: false }, geometry: { type: 'LineString', coordinates: meilleurSegment } });
+        } else {
+            features.push({ type: 'Feature', properties: { color: couleur, dashed: false }, geometry: { type: 'LineString', coordinates: [[lon1, lat1], [lon2, lat2]] } });
         }
     };
 
-    // --- CONSTRUCTION DE L'ITINÉRAIRE ---
-
-    // 1. Marche : Maison -> Premier arrêt
     const chemin1 = await obtenirCheminMarche(coordsDep, [trajet.dep.lon, trajet.dep.lat]);
     features.push({ type: 'Feature', properties: { color: '#64748b', dashed: true }, geometry: { type: 'LineString', coordinates: chemin1 } });
 
-    // 2. Le(s) Bus
     if (trajet.type === 'direct') {
-        const routeId = trajet.ligne.split('::')[0];
-        const couleur = infosLignes[routeId] ? infosLignes[routeId].couleur : '#333';
-        ajouterBus(routeId, trajet.dep.lat, trajet.dep.lon, trajet.arr.lat, trajet.arr.lon, couleur);
+        const couleur = infosLignes[trajet.ligne.split('_branch_')[0]]?.couleur || '#333';
+        ajouterBus(trajet.ligne, trajet.dep.lat, trajet.dep.lon, trajet.arr.lat, trajet.arr.lon, couleur);
     } else {
-        const routeId1 = trajet.ligne1.split('::')[0];
-        const routeId2 = trajet.ligne2.split('::')[0];
-        const c1 = infosLignes[routeId1] ? infosLignes[routeId1].couleur : '#333';
-        const c2 = infosLignes[routeId2] ? infosLignes[routeId2].couleur : '#333';
+        const c1 = infosLignes[trajet.ligne1.split('_branch_')[0]]?.couleur || '#333';
+        const c2 = infosLignes[trajet.ligne2.split('_branch_')[0]]?.couleur || '#333';
 
-        ajouterBus(routeId1, trajet.dep.lat, trajet.dep.lon, trajet.pivot.lat, trajet.pivot.lon, c1);
+        ajouterBus(trajet.ligne1, trajet.dep.lat, trajet.dep.lon, trajet.pivot.lat, trajet.pivot.lon, c1);
 
-        // Marche de transfert entre les deux bus
         const cheminTrans = await obtenirCheminMarche([trajet.pivot.lon, trajet.pivot.lat], [trajet.pivot2.lon, trajet.pivot2.lat]);
         features.push({ type: 'Feature', properties: { color: '#64748b', dashed: true }, geometry: { type: 'LineString', coordinates: cheminTrans } });
 
-        ajouterBus(routeId2, trajet.pivot2.lat, trajet.pivot2.lon, trajet.arr.lat, trajet.arr.lon, c2);
+        ajouterBus(trajet.ligne2, trajet.pivot2.lat, trajet.pivot2.lon, trajet.arr.lat, trajet.arr.lon, c2);
     }
 
-    // 3. Marche : Dernier arrêt -> Arrivée
     const cheminFinal = await obtenirCheminMarche([trajet.arr.lon, trajet.arr.lat], coordsArr);
     features.push({ type: 'Feature', properties: { color: '#64748b', dashed: true }, geometry: { type: 'LineString', coordinates: cheminFinal } });
 
-    // --- AFFICHAGE ---
     const dataGeoJSON = { type: 'FeatureCollection', features: features };
     if (map.getSource('itineraire-transit')) {
         map.getSource('itineraire-transit').setData(dataGeoJSON);
     } else {
         map.addSource('itineraire-transit', { type: 'geojson', data: dataGeoJSON });
-        map.addLayer({
-            id: 'itineraire-transit-bus', type: 'line', source: 'itineraire-transit',
-            filter: ['==', 'dashed', false],
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: { 'line-color': ['get', 'color'], 'line-width': 6 }
-        });
-        map.addLayer({
-            id: 'itineraire-transit-marche', type: 'line', source: 'itineraire-transit',
-            filter: ['==', 'dashed', true],
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: { 'line-color': '#64748b', 'line-width': 4, 'line-dasharray': [2, 2] }
-        });
+        map.addLayer({ id: 'itineraire-transit-bus', type: 'line', source: 'itineraire-transit', filter: ['==', 'dashed', false], layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': 6 } });
+        map.addLayer({ id: 'itineraire-transit-marche', type: 'line', source: 'itineraire-transit', filter: ['==', 'dashed', true], layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#64748b', 'line-width': 4, 'line-dasharray': [2, 2] } });
     }
 }
