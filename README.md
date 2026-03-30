@@ -22,7 +22,7 @@ Ce projet est conçu pour démontrer des compétences avancées en ingénierie l
 
 1. Clonez ce dépôt :
 ```bash
-git clone [https://github.com/VOTRE_NOM/rouen-pulse-3d.git](https://github.com/VOTRE_NOM/rouen-pulse-3d.git)
+git clone https://github.com/SolucePlay/MyAstuce.git
 ```
 2. Ouvrez le dossier dans votre éditeur (ex: VS Code).
 3. Lancez un serveur local (ex: via l'extension *Live Server*).
