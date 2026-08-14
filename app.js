@@ -377,7 +377,7 @@ requestAnimationFrame(animerBus);
 
 // === INFO-TRAFIC EN DIRECT ===
 function chargerInfoTrafic() {
-    const urlTrafic = 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent('https://api.mrn.cityway.fr/disrupt/api/v1/fr/disruptions');
+    const urlTrafic = 'https://corsproxy.io/?' + encodeURIComponent('https://api.mrn.cityway.fr/disrupt/api/v1/fr/disruptions');
 
     fetch(urlTrafic)
         .then(res => res.json())
