@@ -376,73 +376,118 @@ function animerBus(timestamp) {
 requestAnimationFrame(animerBus);
 
 // === INFO-TRAFIC EN DIRECT ===
+// === INFO-TRAFIC EN DIRECT (VERSION DÉTAILLÉE PREMIUM) ===
 function chargerInfoTrafic() {
     const urlTrafic = 'https://corsproxy.io/?' + encodeURIComponent('https://api.mrn.cityway.fr/disrupt/api/v1/fr/disruptions');
 
     fetch(urlTrafic)
-        .then(res => res.json())
-        .then(data => {
-            const liste = document.getElementById('liste-perturbations');
-            liste.innerHTML = '';
+    .then(res => res.json())
+    .then(data => {
+        const liste = document.getElementById('liste-perturbations');
+        liste.innerHTML = '';
 
-            let aDesPerturbations = false;
-            let listeAlertes = Array.isArray(data) ? data : (data.data || data.disruptions || []);
+        let listeAlertes = Array.isArray(data) ? data : (data.data || data.disruptions || []);
 
-            // S'il y a au moins une alerte dans les données, on va afficher la bannière !
-            if (listeAlertes.length > 0) {
-                listeAlertes.forEach(alerte => {
+        if (listeAlertes.length > 0) {
+            listeAlertes.forEach(alerte => {
 
-                    // ON FORCE L'AFFICHAGE DÈS QU'IL Y A UNE ALERTE
-                    aDesPerturbations = true;
+                const li = document.createElement('li');
+                li.style.marginBottom = "15px";
+                li.style.paddingBottom = "15px";
+                li.style.borderBottom = "1px solid #e2e8f0";
+                li.style.fontFamily = "'Inter', sans-serif";
 
-                    const li = document.createElement('li');
-                    li.style.marginBottom = "10px";
-                    li.style.paddingBottom = "10px";
-                    li.style.borderBottom = "1px solid #fecaca";
+                // --- 1. TITRE ---
+                let titre = "Information réseau";
+                if (alerte.messages && alerte.messages.length > 0 && alerte.messages[0].title) {
+                    titre = alerte.messages[0].title;
+                } else if (alerte.title) {
+                    titre = alerte.title;
+                }
 
-                    // 1. On récupère le titre (très robuste)
-                    let titre = "Information réseau";
-                    if (alerte.messages && alerte.messages.length > 0 && alerte.messages[0].title) {
-                        titre = alerte.messages[0].title;
-                    } else if (alerte.title) {
-                        titre = alerte.title;
-                    }
+                // --- 2. SÉVÉRITÉ ET TYPE ---
+                let typeAlerte = alerte.type || "Information";
+                let severite = alerte.severity || "Perturbé";
+                let couleurSeverite = "#f59e0b"; // Orange par défaut
+                if (severite.toLowerCase().includes("coup") || severite.toLowerCase().includes("supprim")) couleurSeverite = "#ef4444"; // Rouge
+                if (severite.toLowerCase().includes("info")) couleurSeverite = "#3b82f6"; // Bleu
 
-                    let texteAlerte = `<b style="display:block; margin-bottom:4px;">${titre}</b>`;
+                // --- 3. DATES ---
+                const formaterDate = (chaineIso) => {
+                    if (!chaineIso) return "Inconnue";
+                    const d = new Date(chaineIso);
+                    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) + " à " + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                };
+                const dateDebut = formaterDate(alerte.effectiveStartDate);
+                let ligneDate = `<div style="font-size: 11px; color: #64748b; margin-top: 4px;">📅 Depuis le ${dateDebut}</div>`;
 
-                    // 2. On essaie d'ajouter les badges des lignes SI on les trouve
-                    let htmlBadges = "";
-                    let idsVus = new Set();
-
-                    if (alerte.impactedObjects && alerte.impactedObjects.length > 0) {
-                        alerte.impactedObjects.forEach(obj => {
-                            // On cherche la ligne dans tous les recoins de l'API Cityway
-                            const ligne = obj.impactedLine || (obj.impactedPtElement ? obj.impactedPtElement.line : null) || obj.impactedRoute;
-
-                            if (ligne && ligne.id && !idsVus.has(ligne.id)) {
-                                idsVus.add(ligne.id);
-                                const idLigne = ligne.id.replace('Astuce:', 'TCAR:');
-
-                                if (infosLignes && infosLignes[idLigne]) {
-                                    htmlBadges += `<span style="background:${infosLignes[idLigne].couleur}; color:white; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px; display:inline-block;">${infosLignes[idLigne].nom}</span>`;
-                                } else {
-                                    htmlBadges += `<span style="background:#94a3b8; color:white; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px; display:inline-block;">${ligne.shortName || '?'}</span>`;
-                                }
+                // --- 4. BADGES DES LIGNES ---
+                let htmlBadges = "";
+                let idsVus = new Set();
+                if (alerte.impactedObjects && alerte.impactedObjects.length > 0) {
+                    alerte.impactedObjects.forEach(obj => {
+                        const ligne = obj.impactedLine || (obj.impactedPtElement ? obj.impactedPtElement.line : null) || obj.impactedRoute;
+                        if (ligne && ligne.id && !idsVus.has(ligne.id)) {
+                            idsVus.add(ligne.id);
+                            const idLigne = ligne.id.replace('Astuce:', 'TCAR:');
+                            if (infosLignes && infosLignes[idLigne]) {
+                                htmlBadges += `<span style="background:${infosLignes[idLigne].couleur}; color:white; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px; display:inline-block;">${infosLignes[idLigne].nom}</span>`;
+                            } else {
+                                htmlBadges += `<span style="background:#94a3b8; color:white; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px; display:inline-block;">${ligne.shortName || '?'}</span>`;
                             }
-                        });
-                    }
+                        }
+                    });
+                }
+                if (htmlBadges !== "") htmlBadges = `<div style="display:flex; gap:5px; flex-wrap:wrap; margin: 8px 0;">${htmlBadges}</div>`;
 
-                    // Si on a trouvé des lignes, on les affiche sous le titre
-                    if (htmlBadges !== "") {
-                        texteAlerte += `<div style="display:flex; gap:5px; flex-wrap:wrap;">${htmlBadges}</div>`;
-                    }
+                // --- 5. DESCRIPTION DÉTAILLÉE ---
+                let description = "Aucun détail supplémentaire.";
+                if (alerte.messages && alerte.messages.length > 0 && alerte.messages[0].text) {
+                    description = alerte.messages[0].text;
+                } else if (alerte.description) {
+                    description = alerte.description;
+                }
+                // Nettoyage rapide si l'API envoie des balises HTML mal formées
+                description = description.replace(/<p>/g, "<div style='margin-bottom:5px;'>").replace(/<\/p>/g, "</div>");
 
-                    li.innerHTML = texteAlerte;
-                    liste.appendChild(li);
-                });
-            }
-        })
-        .catch(erreur => console.error("❌ Erreur Info-trafic :", erreur));
+                // --- 6. PIÈCES JOINTES (PLANS PDF) ---
+                let htmlPiecesJointes = "";
+                if (alerte.attachments && alerte.attachments.length > 0) {
+                    htmlPiecesJointes = `<div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #cbd5e1;">`;
+                    alerte.attachments.forEach(pj => {
+                        if (pj.url) {
+                            htmlPiecesJointes += `<a href="${pj.url}" target="_blank" style="display: inline-block; background: #f1f5f9; color: #0f172a; padding: 4px 8px; border-radius: 4px; text-decoration: none; font-size: 11px; border: 1px solid #e2e8f0; margin-right: 5px;">📄 ${pj.label || "Plan attaché"}</a>`;
+                        }
+                    });
+                    htmlPiecesJointes += `</div>`;
+                }
+
+                // --- ASSEMBLAGE FINAL ---
+                let texteAlerte = `
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background-color: ${couleurSeverite};"></span>
+                <span style="font-size: 10px; text-transform: uppercase; font-weight: bold; color: ${couleurSeverite};">${typeAlerte}</span>
+                </div>
+                <b style="display:block; font-size: 14px; color: #0f172a; margin-bottom:4px; line-height: 1.3;">${titre}</b>
+                ${ligneDate}
+                ${htmlBadges}
+                <div style="font-size: 12px; color: #334155; line-height: 1.5; background: #f8fafc; padding: 10px; border-radius: 6px; margin-top: 8px; overflow-x: auto;">
+                ${description}
+                </div>
+                ${htmlPiecesJointes}
+                `;
+
+                li.innerHTML = texteAlerte;
+                liste.appendChild(li);
+            });
+        } else {
+            liste.innerHTML = '<li style="color:#64748b; text-align:center; padding: 20px;">Aucune perturbation signalée actuellement.</li>';
+        }
+    })
+    .catch(erreur => {
+        console.error("❌ Erreur Info-trafic :", erreur);
+        document.getElementById('liste-perturbations').innerHTML = '<li style="color:#ef4444; text-align:center;">Erreur lors du chargement du trafic.</li>';
+    });
 }
 
 // === CONFIGURATION DU CONVERTISSEUR ET TRADUCTEUR ===
