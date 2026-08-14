@@ -1,5 +1,6 @@
 let marqueursItineraire = []; // Liste pour stocker les drapeaux de trajet
 let donneesTempsReel = [];
+let dictionnaireDestinations = {}; // Va stocker { "TAE:BJV1CWF": "Mairie de St-Pierre", ... }
 
 const HORAIRES_STATIQUES = {
     "TCAR:90": { // Métro - Direction Georges Braque (Période Bleue Soir)
@@ -264,7 +265,9 @@ function chargerPositionsBus() {
                         idBusActifs.add(idBus);
 
                         // 1. Infos de base (Ligne et Destination)
-                        const destination = (entite.vehicle.vehicle && entite.vehicle.vehicle.label) ? entite.vehicle.vehicle.label : "Destination inconnue";
+                        const destination = (tripId && dictionnaireDestinations[tripId])
+                        ? dictionnaireDestinations[tripId]
+                        : "Destination inconnue";
                         const infoLigne = infosLignes[rawRouteId] || { nom: rawRouteId.replace("TCAR:", ""), couleur: "#555" };
 
                         // 2. LE RETARD ET L'AVANCE (Le retour !)
@@ -754,9 +757,43 @@ function genererMenuLignes() {
 const CC49 = "+proj=lcc +lat_1=48.25 +lat_2=49.75 +lat_0=49 +lon_0=3 +x_0=1700000 +y_0=8200000 +ellps=GRS80 +units=m +no_defs";
 const WGS84 = "EPSG:4326"; // Le système GPS standard
 
+async function chargerDestinationsTrips() {
+    try {
+        // Assure-toi que trips.txt est dans le même dossier que tes fichiers GeoJSON
+        const reponse = await fetch('trips.txt');
+        const texte = await reponse.text();
+
+        // On découpe le fichier ligne par ligne
+        const lignes = texte.split('\n');
+
+        // On boucle sur chaque ligne (en sautant la ligne 0 qui contient les en-têtes)
+        for (let i = 1; i < lignes.length; i++) {
+            // Dans un CSV, les colonnes sont séparées par des virgules
+            const colonnes = lignes[i].split(',');
+
+            // On vérifie qu'il y a bien des données sur cette ligne
+            if (colonnes.length > 4) {
+                const tripId = colonnes[2]; // La 3ème colonne est le trip_id
+
+                // La 4ème colonne est le headsign. On utilise replace pour enlever les guillemets " "
+                const headsign = colonnes[3].replace(/"/g, '');
+
+                // On enregistre dans la mémoire !
+                dictionnaireDestinations[tripId] = headsign;
+            }
+        }
+        console.log(`✅ Destinations chargées : ${Object.keys(dictionnaireDestinations).length} trajets mémorisés !`);
+    } catch (erreur) {
+        console.error("❌ Impossible de charger trips.txt :", erreur);
+    }
+}
+
 map.on('load', async () => {
-    // On appelle la bonne fonction (Celle qui lit n'importe quel fichier)
-    await chargerDonneesOfficielles();
+    // On charge le dictionnaire des destinations EN MÊME TEMPS que les lignes
+    await Promise.all([
+        chargerDonneesOfficielles(),
+        chargerDestinationsTrips() // <-- L'ajout est ici !
+    ]);
 
     chargerPositionsBus();
     chargerInfoTrafic();
