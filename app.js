@@ -17,7 +17,7 @@ function chercherHoraireTheorique(routeId) {
     const data = HORAIRES_STATIQUES[routeId];
     if (!data) return null;
 
-    // On cherche l'horaire dans le PDF qui est juste après l'heure actuelle 
+    // On cherche l'horaire dans le PDF qui est juste après l'heure actuelle
     const prochain = data.Boulingrin.find(h => h > heureActuelle);
     return prochain ? prochain : null;
 }
@@ -223,134 +223,134 @@ function chargerPositionsBus() {
 
     Promise.all([
         fetch(urlPositions).then(res => res.json()),
-        fetch(urlTemps).then(res => res.json())
+                fetch(urlTemps).then(res => res.json())
     ])
-        .then(([dataPositions, dataTemps]) => {
-            if (dataTemps && dataTemps.entity) {
-                donneesTempsReel = dataTemps.entity;
-            }
+    .then(([dataPositions, dataTemps]) => {
+        if (dataTemps && dataTemps.entity) {
+            donneesTempsReel = dataTemps.entity;
+        }
 
-            const tripUpdates = new Map();
-            if (dataTemps && dataTemps.entity) {
-                dataTemps.entity.forEach(e => {
-                    if (e.tripUpdate && e.tripUpdate.trip && e.tripUpdate.trip.tripId) {
-                        tripUpdates.set(e.tripUpdate.trip.tripId, e.tripUpdate);
-                    }
-                });
-            }
-
-            const idBusActifs = new Set();
-            if (dataPositions && dataPositions.entity) {
-                dataPositions.entity.forEach(entite => {
-                    if (entite.vehicle && entite.vehicle.position) {
-                        const lat = entite.vehicle.position.latitude;
-                        const lon = entite.vehicle.position.longitude;
-                        const rawRouteId = entite.vehicle.trip ? entite.vehicle.trip.routeId : "Inconnue";
-
-                        // 🚨 LE VIGILE EST ICI : On élimine les lignes inconnues ("?") immédiatement !
-                        if (rawRouteId !== 'TCAR:90' && !infosLignes[rawRouteId]) {
-                            return; // On stoppe tout pour ce bus, il n'ira pas sur la carte.
-                        }
-
-                        const idBus = entite.vehicle.vehicle ? entite.vehicle.vehicle.id : "Inconnu";
-                        const tripId = entite.vehicle.trip ? entite.vehicle.trip.tripId : null;
-
-                        // Filtre Itinéraire / Menu
-                        if (modeItineraireActif) {
-                            if (!tripsItineraire.has(tripId)) return;
-                        } else if (lignesFiltrees.size > 0) {
-                            if (!lignesFiltrees.has(rawRouteId)) return;
-                        }
-
-                        idBusActifs.add(idBus);
-
-                        // 1. Infos de base (Ligne et Destination)
-                        const destination = (tripId && dictionnaireDestinations[tripId])
-                        ? dictionnaireDestinations[tripId]
-                        : "Destination inconnue";
-                        const infoLigne = infosLignes[rawRouteId] || { nom: rawRouteId.replace("TCAR:", ""), couleur: "#555" };
-
-                        // 2. LE RETARD ET L'AVANCE (Le retour !)
-                        let infoTemps = "<i>Pas d'info temps réel</i>";
-                        if (tripId && tripUpdates.has(tripId)) {
-                            const update = tripUpdates.get(tripId);
-                            if (update.stopTimeUpdate && update.stopTimeUpdate.length > 0) {
-                                const delay = update.stopTimeUpdate[0].departure?.delay || 0;
-                                const retMin = Math.round(delay / 60);
-                                if (retMin > 0) infoTemps = `<span style="color:red">En retard de ${retMin} min</span>`;
-                                else if (retMin < 0) infoTemps = `<span style="color:green">En avance de ${Math.abs(retMin)} min</span>`;
-                                else infoTemps = `<span style="color:green">À l'heure exacte</span>`;
-                            }
-                        }
-
-                        // 3. L'AFFLUENCE ET LES PLACES (Le retour !)
-                        let texteAffluence = "";
-                        if (entite.vehicle.occupancyStatus) {
-                            const dicoAffluence = {
-                                "EMPTY": "Vide",
-                                "MANY_SEATS_AVAILABLE": "Beaucoup de places",
-                                "FEW_SEATS_AVAILABLE": "Peu de places",
-                                "STANDING_ROOM_ONLY": "Places debout",
-                                "CRUSHED_STANDING_ROOM_ONLY": "Très bondé",
-                                "FULL": "Complet",
-                                "NOT_ACCEPTING_PASSENGERS": "Ne prend plus de passagers"
-                            };
-                            texteAffluence = `<br>Affluence : <b>${dicoAffluence[entite.vehicle.occupancyStatus] || "Inconnue"}</b>`;
-                        }
-
-                        // 4. On rassemble toutes les infos dans la belle bulle
-                        const textePopup = `<b>Ligne ${infoLigne.nom}</b><br>Direction : ${destination}<br>État : ${infoTemps}${texteAffluence}`;
-
-                        // --- GESTION DU MARQUEUR ---
-                        if (marqueursBus[idBus]) {
-                            const busInfo = marqueursBus[idBus];
-                            const oldLngLat = busInfo.marker.getLngLat();
-                            busInfo.startLngLat = [oldLngLat.lng, oldLngLat.lat];
-                            busInfo.targetLngLat = [lon, lat];
-                            busInfo.startTime = performance.now();
-                            busInfo.popup.setHTML(textePopup);
-                        } else {
-                            const el = document.createElement('div');
-
-                            // LOGIQUE D'ICÔNE (Plus besoin du "?")
-                            if (rawRouteId === 'TCAR:90') {
-                                el.className = 'bus-icon';
-                                el.innerHTML = '🚇';
-                            } else {
-                                const info = infosLignes[rawRouteId];
-                                el.className = 'line-badge-icon';
-                                el.style.backgroundColor = info.couleur;
-                                el.innerHTML = info.nom;
-                            }
-
-                            const popup = new maplibregl.Popup({ offset: 25 }).setHTML(textePopup);
-                            const marker = new maplibregl.Marker({ element: el })
-                                .setLngLat([lon, lat])
-                                .setPopup(popup)
-                                .addTo(map);
-
-                            marqueursBus[idBus] = {
-                                marker: marker,
-                                popup: popup,
-                                startLngLat: [lon, lat],
-                                targetLngLat: [lon, lat],
-                                startTime: null
-                            };
-                        }
-                    }
-                });
-            }
-
-            // Nettoyage
-            for (const id in marqueursBus) {
-                if (!idBusActifs.has(id)) {
-                    marqueursBus[id].marker.remove();
-                    delete marqueursBus[id];
+        const tripUpdates = new Map();
+        if (dataTemps && dataTemps.entity) {
+            dataTemps.entity.forEach(e => {
+                if (e.tripUpdate && e.tripUpdate.trip && e.tripUpdate.trip.tripId) {
+                    tripUpdates.set(e.tripUpdate.trip.tripId, e.tripUpdate);
                 }
+            });
+        }
+
+        const idBusActifs = new Set();
+        if (dataPositions && dataPositions.entity) {
+            dataPositions.entity.forEach(entite => {
+                if (entite.vehicle && entite.vehicle.position) {
+                    const lat = entite.vehicle.position.latitude;
+                    const lon = entite.vehicle.position.longitude;
+                    const rawRouteId = entite.vehicle.trip ? entite.vehicle.trip.routeId : "Inconnue";
+
+                    // 🚨 LE VIGILE EST ICI : On élimine les lignes inconnues ("?") immédiatement !
+                    if (rawRouteId !== 'TCAR:90' && !infosLignes[rawRouteId]) {
+                        return; // On stoppe tout pour ce bus, il n'ira pas sur la carte.
+                    }
+
+                    const idBus = entite.vehicle.vehicle ? entite.vehicle.vehicle.id : "Inconnu";
+                    const tripId = entite.vehicle.trip ? entite.vehicle.trip.tripId : null;
+
+                    // Filtre Itinéraire / Menu
+                    if (modeItineraireActif) {
+                        if (!tripsItineraire.has(tripId)) return;
+                    } else if (lignesFiltrees.size > 0) {
+                        if (!lignesFiltrees.has(rawRouteId)) return;
+                    }
+
+                    idBusActifs.add(idBus);
+
+                    // 1. Infos de base (Ligne et Destination)
+                    const destination = (tripId && dictionnaireDestinations[tripId])
+                    ? dictionnaireDestinations[tripId]
+                    : "Destination inconnue";
+                    const infoLigne = infosLignes[rawRouteId] || { nom: rawRouteId.replace("TCAR:", ""), couleur: "#555" };
+
+                    // 2. LE RETARD ET L'AVANCE (Le retour !)
+                    let infoTemps = "<i>Pas d'info temps réel</i>";
+                    if (tripId && tripUpdates.has(tripId)) {
+                        const update = tripUpdates.get(tripId);
+                        if (update.stopTimeUpdate && update.stopTimeUpdate.length > 0) {
+                            const delay = update.stopTimeUpdate[0].departure?.delay || 0;
+                            const retMin = Math.round(delay / 60);
+                            if (retMin > 0) infoTemps = `<span style="color:red">En retard de ${retMin} min</span>`;
+                            else if (retMin < 0) infoTemps = `<span style="color:green">En avance de ${Math.abs(retMin)} min</span>`;
+                            else infoTemps = `<span style="color:green">À l'heure exacte</span>`;
+                        }
+                    }
+
+                    // 3. L'AFFLUENCE ET LES PLACES (Le retour !)
+                    let texteAffluence = "";
+                    if (entite.vehicle.occupancyStatus) {
+                        const dicoAffluence = {
+                            "EMPTY": "Vide",
+                            "MANY_SEATS_AVAILABLE": "Beaucoup de places",
+                            "FEW_SEATS_AVAILABLE": "Peu de places",
+                            "STANDING_ROOM_ONLY": "Places debout",
+                            "CRUSHED_STANDING_ROOM_ONLY": "Très bondé",
+                            "FULL": "Complet",
+                            "NOT_ACCEPTING_PASSENGERS": "Ne prend plus de passagers"
+                        };
+                        texteAffluence = `<br>Affluence : <b>${dicoAffluence[entite.vehicle.occupancyStatus] || "Inconnue"}</b>`;
+                    }
+
+                    // 4. On rassemble toutes les infos dans la belle bulle
+                    const textePopup = `<b>Ligne ${infoLigne.nom}</b><br>Direction : ${destination}<br>État : ${infoTemps}${texteAffluence}`;
+
+                    // --- GESTION DU MARQUEUR ---
+                    if (marqueursBus[idBus]) {
+                        const busInfo = marqueursBus[idBus];
+                        const oldLngLat = busInfo.marker.getLngLat();
+                        busInfo.startLngLat = [oldLngLat.lng, oldLngLat.lat];
+                        busInfo.targetLngLat = [lon, lat];
+                        busInfo.startTime = performance.now();
+                        busInfo.popup.setHTML(textePopup);
+                    } else {
+                        const el = document.createElement('div');
+
+                        // LOGIQUE D'ICÔNE (Plus besoin du "?")
+                        if (rawRouteId === 'TCAR:90') {
+                            el.className = 'bus-icon';
+                            el.innerHTML = '🚇';
+                        } else {
+                            const info = infosLignes[rawRouteId];
+                            el.className = 'line-badge-icon';
+                            el.style.backgroundColor = info.couleur;
+                            el.innerHTML = info.nom;
+                        }
+
+                        const popup = new maplibregl.Popup({ offset: 25 }).setHTML(textePopup);
+                        const marker = new maplibregl.Marker({ element: el })
+                        .setLngLat([lon, lat])
+                        .setPopup(popup)
+                        .addTo(map);
+
+                        marqueursBus[idBus] = {
+                            marker: marker,
+                            popup: popup,
+                            startLngLat: [lon, lat],
+                            targetLngLat: [lon, lat],
+                            startTime: null
+                        };
+                    }
+                }
+            });
+        }
+
+        // Nettoyage
+        for (const id in marqueursBus) {
+            if (!idBusActifs.has(id)) {
+                marqueursBus[id].marker.remove();
+                delete marqueursBus[id];
             }
-            document.getElementById('heure-maj').textContent = "Mise à jour : " + new Date().toLocaleTimeString();
-        })
-        .catch(erreur => console.error("Erreur positions :", erreur));
+        }
+        document.getElementById('heure-maj').textContent = "Mise à jour : " + new Date().toLocaleTimeString();
+    })
+    .catch(erreur => console.error("Erreur positions :", erreur));
 }
 
 const DUREE_ANIMATION = 2000;
@@ -553,8 +553,8 @@ async function chargerDonneesOfficielles() {
     try {
         const [resReg, resScol, resArrets] = await Promise.all([
             fetch(fichiers.regulieres),
-            fetch(fichiers.scolaires),
-            fetch(fichiers.arrets)
+                                                               fetch(fichiers.scolaires),
+                                                               fetch(fichiers.arrets)
         ]);
 
         const geoReg = await resReg.json();
@@ -714,10 +714,11 @@ function genererMenuLignes() {
         2: { titre: "🚌 Lignes régulières", div: document.createElement('div') },
         3: { titre: "🌙 Lignes de nuit", div: document.createElement('div') },
         4: { titre: "🎒 Lignes scolaires", div: document.createElement('div') },
-        5: { titre: "⛴️ Navette Fluviale", div: document.createElement('div') }
+        5: { titre: "⛴️ Navette Fluviale", div: document.createElement('div') },
+        6: { titre: "🚲🅿️ Autres transports", div: document.createElement('div') }
     };
 
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
         const headerDiv = document.createElement('div');
         headerDiv.className = 'categorie-header';
 
@@ -821,6 +822,57 @@ function genererMenuLignes() {
 
         categories[idCat].sousGrille.appendChild(btn);
     }
+
+    // === BOUTONS MANUELS DE LA CATÉGORIE "AUTRES TRANSPORTS" ===
+    // (Ce ne sont pas des lignes TCAR, donc ils ne passent pas par la boucle de tri ci-dessus)
+    const btnLovelo = document.createElement('button');
+    btnLovelo.className = 'ligne-btn';
+    btnLovelo.textContent = '🚲 LOVELO';
+    btnLovelo.style.borderColor = '#10b981';
+    btnLovelo.style.color = veloVisible ? 'white' : '#10b981';
+    btnLovelo.style.backgroundColor = veloVisible ? '#10b981' : 'transparent';
+
+    btnLovelo.onclick = () => {
+        veloVisible = !veloVisible;
+        if (veloVisible) {
+            btnLovelo.style.backgroundColor = '#10b981';
+            btnLovelo.style.color = 'white';
+            chargerVelosLibreService();
+        } else {
+            btnLovelo.style.backgroundColor = 'transparent';
+            btnLovelo.style.color = '#10b981';
+            marqueursVelos.forEach(m => m.remove());
+            marqueursVelos = [];
+        }
+    };
+    categories[6].sousGrille.appendChild(btnLovelo);
+
+    const btnParking = document.createElement('button');
+    btnParking.className = 'ligne-btn';
+    btnParking.textContent = '🅿️ PARKING';
+    btnParking.style.borderColor = '#3b82f6';
+    btnParking.style.color = parkingVisible ? 'white' : '#3b82f6';
+    btnParking.style.backgroundColor = parkingVisible ? '#3b82f6' : 'transparent';
+
+    btnParking.onclick = () => {
+        parkingVisible = !parkingVisible;
+        if (parkingVisible) {
+            btnParking.style.backgroundColor = '#3b82f6';
+            btnParking.style.color = 'white';
+            chargerParkingsPMR().then(() => {
+                if (map.getLayer('parking-pmr-layer')) {
+                    map.setLayoutProperty('parking-pmr-layer', 'visibility', 'visible');
+                }
+            });
+        } else {
+            btnParking.style.backgroundColor = 'transparent';
+            btnParking.style.color = '#3b82f6';
+            if (map.getLayer('parking-pmr-layer')) {
+                map.setLayoutProperty('parking-pmr-layer', 'visibility', 'none');
+            }
+        }
+    };
+    categories[6].sousGrille.appendChild(btnParking);
 }
 
 // === CONFIGURATION DU CONVERTISSEUR (CC49 vers GPS) ===
@@ -863,14 +915,16 @@ map.on('load', async () => {
     // On charge le dictionnaire des destinations EN MÊME TEMPS que les lignes
     await Promise.all([
         chargerDonneesOfficielles(),
-        chargerDestinationsTrips() // <-- L'ajout est ici !
+                      chargerDestinationsTrips() // <-- L'ajout est ici !
     ]);
 
     chargerPositionsBus();
     chargerInfoTrafic();
+    chargerVelosLibreService();
 
     setInterval(chargerPositionsBus, 20000);
     setInterval(chargerInfoTrafic, 300000);
+    setInterval(chargerVelosLibreService, 60000); // Les stations vélo bougent moins vite que les bus, 60s suffit
 });
 
 const MAPTILER_KEY = 'IVox3aAq7YDuFvXSXXu8';
@@ -940,7 +994,7 @@ function chercherProchainBus(routeIdToFind, stopIdToFind) {
                                 meilleurPassage = {
                                     minutes: delaiMinutes,
                                     retard: stu.departure && stu.departure.delay ? Math.round(stu.departure.delay / 60) : 0, // <--- LA VIRGULE MANQUANTE ÉTAIT ICI !
-                                    tripId: e.tripUpdate.trip.tripId
+                                                    tripId: e.tripUpdate.trip.tripId
                                 };
                             }
                         }
@@ -1206,19 +1260,19 @@ async function lancerCalcul(mode) {
 
             // 3. Le Footer HTML avec les badges
             const htmlFooterPremium = `
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding-top: 12px; border-top: 1px dashed #cbd5e1; font-size: 13px; color: #64748b;">
-                    <div style="display: flex; gap: 15px;">
-                        <span title="Bilan Carbone (Émissions estimées)" style="display:flex; align-items:center; gap:4px; color: #10b981; font-weight: bold;">
-                            🌱 ${co2}g CO₂
-                        </span>
-                        <span title="Bilan Santé (Calories brûlées en marchant)" style="display:flex; align-items:center; gap:4px; color: #ea580c; font-weight: bold;">
-                            🔥 ${kcal} kcal
-                        </span>
-                    </div>
-                    <div style="font-weight: bold; color: #0f172a; background: #f1f5f9; padding: 4px 8px; border-radius: 6px; border: 1px solid #e2e8f0;">
-                        🎫 1,80 €
-                    </div>
-                </div>`;
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding-top: 12px; border-top: 1px dashed #cbd5e1; font-size: 13px; color: #64748b;">
+            <div style="display: flex; gap: 15px;">
+            <span title="Bilan Carbone (Émissions estimées)" style="display:flex; align-items:center; gap:4px; color: #10b981; font-weight: bold;">
+            🌱 ${co2}g CO₂
+            </span>
+            <span title="Bilan Santé (Calories brûlées en marchant)" style="display:flex; align-items:center; gap:4px; color: #ea580c; font-weight: bold;">
+            🔥 ${kcal} kcal
+            </span>
+            </div>
+            <div style="font-weight: bold; color: #0f172a; background: #f1f5f9; padding: 4px 8px; border-radius: 6px; border: 1px solid #e2e8f0;">
+            🎫 1,80 €
+            </div>
+            </div>`;
             // --------------------------------------------------
 
             let htmlDetails = "";
@@ -1226,13 +1280,13 @@ async function lancerCalcul(mode) {
                 const l = parserLigne(trajet.ligne);
                 const infoLive = chercherProchainBus(l.baseId, trajet.dep.id);
                 htmlDetails = `<h4 style="margin: 0 0 10px 0; color:#0f172a;">⏱️ ~${trajet.tTotal} min</h4>
-    <div style="display: flex; gap: 10px; margin-bottom: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche1} min</b> jusqu'à <b>${trajet.dep.n}</b></span></div>
-    <div style="display: flex; gap: 10px; border-left: 3px solid ${l.couleur}; padding-left: 10px; font-size:14px;">
-    <span style="background: ${l.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content; font-weight:bold;">${l.nom}</span>
-    <span>Attente + Trajet ~<b>${trajet.attente + trajet.tBus} min</b><br>Descendre à <b>${trajet.arr.n}</b><br>${formaterInfoLive(infoLive, l.nom)}</span>
-    </div>
-    <div style="display: flex; gap: 10px; margin-top: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche2} min</b> jusqu'à l'arrivée</span></div>
-    ${htmlFooterPremium}`; // Injection du footer premium
+                <div style="display: flex; gap: 10px; margin-bottom: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche1} min</b> jusqu'à <b>${trajet.dep.n}</b></span></div>
+                <div style="display: flex; gap: 10px; border-left: 3px solid ${l.couleur}; padding-left: 10px; font-size:14px;">
+                <span style="background: ${l.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content; font-weight:bold;">${l.nom}</span>
+                <span>Attente + Trajet ~<b>${trajet.attente + trajet.tBus} min</b><br>Descendre à <b>${trajet.arr.n}</b><br>${formaterInfoLive(infoLive, l.nom)}</span>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche2} min</b> jusqu'à l'arrivée</span></div>
+                ${htmlFooterPremium}`; // Injection du footer premium
             } else {
                 const l1 = parserLigne(trajet.ligne1);
                 const l2 = parserLigne(trajet.ligne2);
@@ -1241,18 +1295,18 @@ async function lancerCalcul(mode) {
                 const textCorresp = trajet.pivot.n === trajet.pivot2.n ? `🔄 Quai à quai + Attente (~${trajet.tCorresp} min)` : `🔄 Transfert vers ${trajet.pivot2.n} (~${trajet.tCorresp} min)`;
 
                 htmlDetails = `<h4 style="margin: 0 0 10px 0; color:#0f172a;">⏱️ ~${trajet.tTotal} min <span style="font-size:12px; font-weight:normal; color:#64748b;">(1 Corresp.)</span></h4>
-    <div style="display: flex; gap: 10px; margin-bottom: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche1} min</b> jusqu'à <b>${trajet.dep.n}</b></span></div>
-    <div style="display: flex; gap: 10px; border-left: 3px solid ${l1.couleur}; padding-left: 10px; font-size:14px;">
-        <span style="background: ${l1.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content; font-weight:bold;">${l1.nom}</span>
-        <span>Attente + Trajet ~<b>${trajet.attente1 + trajet.tBus1} min</b><br>Descendre à <b>${trajet.pivot.n}</b><br>${formaterInfoLive(infoLive1, l1.nom)}</span>
-    </div>
-    <div style="margin: 8px 0; padding-left: 15px; font-size:13px; color:#ea580c; font-weight:bold;">${textCorresp}</div>
-    <div style="display: flex; gap: 10px; border-left: 3px solid ${l2.couleur}; padding-left: 10px; font-size:14px;">
-        <span style="background: ${l2.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content; font-weight:bold;">${l2.nom}</span>
-        <span>Trajet ~<b>${trajet.tBus2} min</b><br>Descendre à <b>${trajet.arr.n}</b><br>${formaterInfoLive(infoLive2, l2.nom)}</span>
-    </div>
-    <div style="display: flex; gap: 10px; margin-top: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche2} min</b> jusqu'à l'arrivée</span></div>
-    ${htmlFooterPremium}`; // Injection du footer premium
+                <div style="display: flex; gap: 10px; margin-bottom: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche1} min</b> jusqu'à <b>${trajet.dep.n}</b></span></div>
+                <div style="display: flex; gap: 10px; border-left: 3px solid ${l1.couleur}; padding-left: 10px; font-size:14px;">
+                <span style="background: ${l1.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content; font-weight:bold;">${l1.nom}</span>
+                <span>Attente + Trajet ~<b>${trajet.attente1 + trajet.tBus1} min</b><br>Descendre à <b>${trajet.pivot.n}</b><br>${formaterInfoLive(infoLive1, l1.nom)}</span>
+                </div>
+                <div style="margin: 8px 0; padding-left: 15px; font-size:13px; color:#ea580c; font-weight:bold;">${textCorresp}</div>
+                <div style="display: flex; gap: 10px; border-left: 3px solid ${l2.couleur}; padding-left: 10px; font-size:14px;">
+                <span style="background: ${l2.couleur}; color: white; padding: 3px 8px; border-radius: 4px; height: max-content; font-weight:bold;">${l2.nom}</span>
+                <span>Trajet ~<b>${trajet.tBus2} min</b><br>Descendre à <b>${trajet.arr.n}</b><br>${formaterInfoLive(infoLive2, l2.nom)}</span>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 8px; font-size:14px;">🚶 <span>Marche <b>${trajet.tMarche2} min</b> jusqu'à l'arrivée</span></div>
+                ${htmlFooterPremium}`; // Injection du footer premium
             }
 
             divTrajet.innerHTML = htmlDetails;
@@ -1344,7 +1398,7 @@ function configurerFavori(idBouton, cleStockage, nomAffichage) {
 
         const nouvelleAdresse = prompt(
             `Modifier ou effacer l'adresse pour ${nomAffichage} :\n(Laissez vide pour effacer le favori)`,
-            localStorage.getItem(cleStockage) || ""
+                                       localStorage.getItem(cleStockage) || ""
         );
 
         if (nouvelleAdresse !== null) {
@@ -1387,9 +1441,9 @@ function ajouterDrapeau(coords, emoji, titre) {
     el.title = titre;
 
     const m = new maplibregl.Marker({ element: el })
-        .setLngLat(coords)
-        .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`<b>${titre}</b>`))
-        .addTo(map);
+    .setLngLat(coords)
+    .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`<b>${titre}</b>`))
+    .addTo(map);
     marqueursItineraire.push(m);
 }
 
@@ -1408,6 +1462,203 @@ function nettoyerAncienTrajet() {
     if (map.getLayer('itineraire-transit-bus')) map.removeLayer('itineraire-transit-bus');
     if (map.getLayer('itineraire-transit-marche')) map.removeLayer('itineraire-transit-marche');
     if (map.getSource('itineraire-transit')) map.removeSource('itineraire-transit');
+}
+
+// === FONCTION VÉLOS LOVÉLO (AVEC CONSOLE DE DÉBOGAGE) ===
+let marqueursVelos = [];
+let veloVisible = true; // Piloté par le bouton "🚲 LOVELO" de la catégorie "Autres transports"
+
+// === PARKINGS PMR (Métropole Rouen Normandie) ===
+// On utilise une couche MapLibre native (source + layer) plutôt que des marqueurs DOM,
+// car il y a plus de 3500 places : bien plus performant qu'un Marker par place.
+let parkingVisible = false; // Piloté par le bouton "🅿️ PARKING" de la catégorie "Autres transports"
+let parkingsCharges = false;
+
+// Convertit un emoji en image bitmap utilisable par map.addImage().
+// Nécessaire car les couches "symbol" de MapLibre GL utilisent un système de glyphes (PBF)
+// qui ne couvre pas les emoji (hors du plan Unicode de base) : text-field ne peut pas les afficher.
+function creerIconeEmoji(emoji, taille = 48) {
+    const canvas = document.createElement('canvas');
+    canvas.width = taille;
+    canvas.height = taille;
+    const ctx = canvas.getContext('2d');
+    ctx.font = `${Math.round(taille * 0.75)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, taille / 2, taille / 2 + taille * 0.05);
+    return ctx.getImageData(0, 0, taille, taille);
+}
+
+async function chargerParkingsPMR() {
+    if (parkingsCharges) return; // On ne charge le fichier qu'une seule fois
+
+    console.log("🅿️ [Parking PMR] Chargement du fichier local...");
+
+    try {
+        const reponse = await fetch('parkings-pmr.geojson');
+        const dataBrute = await reponse.json();
+
+        // Le fichier fournit une propriété "Geolocalisation": [lat, lon] déjà en WGS84,
+        // bien plus fiable que geometry.coordinates qui est en projection CC49 (mètres).
+        const featuresCorrigees = dataBrute.features
+        .filter(f => Array.isArray(f.properties?.Geolocalisation) && f.properties.Geolocalisation.length === 2)
+        .map(f => ({
+            type: 'Feature',
+            properties: f.properties,
+            geometry: {
+                type: 'Point',
+                coordinates: [f.properties.Geolocalisation[1], f.properties.Geolocalisation[0]] // [lon, lat]
+            }
+        }));
+
+        const geojsonCorrige = { type: 'FeatureCollection', features: featuresCorrigees };
+
+        if (!map.hasImage('parking-icon')) {
+            map.addImage('parking-icon', creerIconeEmoji('🅿️', 48), { pixelRatio: 2 });
+        }
+
+        if (!map.getSource('parking-pmr-source')) {
+            map.addSource('parking-pmr-source', {
+                type: 'geojson',
+                data: geojsonCorrige
+            });
+
+            map.addLayer({
+                id: 'parking-pmr-layer',
+                type: 'symbol',
+                source: 'parking-pmr-source',
+                layout: {
+                    'icon-image': 'parking-icon',
+                    'icon-size': 0.5,
+                    'icon-allow-overlap': true,
+                    'icon-ignore-placement': true,
+                    'visibility': parkingVisible ? 'visible' : 'none'
+                }
+            });
+
+            // Popup au clic sur une place PMR
+            map.on('click', 'parking-pmr-layer', (e) => {
+                const p = e.features[0].properties;
+                const popupInfo = `
+                <div style="font-family: 'Inter', sans-serif;">
+                <b style="color: #0f172a; font-size: 14px;">🅿️ Place PMR</b><br>
+                <div style="margin-top: 5px; font-size: 13px;">
+                <span style="color: #334155;">${p.Rue && p.Rue !== 'Non renseigné' ? p.Rue : (p.Ville || '')}</span><br>
+                <span style="color: #64748b;">${p.Ville || ''}</span><br>
+                <b>${p.Nb_places || 1}</b> place(s) — ${p.Type_place || ''}
+                ${p.Gestionnaire && p.Gestionnaire !== 'Non renseigné' ? `<br><span style="color: #64748b;">Gestionnaire : ${p.Gestionnaire}</span>` : ''}
+                </div>
+                </div>`;
+
+                new maplibregl.Popup({ offset: 10 })
+                .setLngLat(e.lngLat)
+                .setHTML(popupInfo)
+                .addTo(map);
+            });
+
+            map.on('mouseenter', 'parking-pmr-layer', () => map.getCanvas().style.cursor = 'pointer');
+            map.on('mouseleave', 'parking-pmr-layer', () => map.getCanvas().style.cursor = '');
+        }
+
+        parkingsCharges = true;
+        console.log(`✅ [Parking PMR] ${featuresCorrigees.length} places affichées sur la carte !`);
+    } catch (e) {
+        console.error("❌ [Parking PMR] Erreur lors du chargement :", e);
+    }
+}
+
+async function chargerVelosLibreService() {
+    if (!veloVisible) {
+        marqueursVelos.forEach(m => m.remove());
+        marqueursVelos = [];
+        return;
+    }
+
+    console.log("🚲 [Lovélo] Tentative de récupération des données...");
+
+
+    const urlInfo = 'https://corsproxy.io/?' + encodeURIComponent('https://gbfs.urbansharing.com/lovelolibreservice.fr/station_information.json');
+    const urlStatus = 'https://corsproxy.io/?' + encodeURIComponent('https://gbfs.urbansharing.com/lovelolibreservice.fr/station_status.json');
+
+    try {
+        const [resInfo, resStatus] = await Promise.all([
+            fetch(urlInfo),
+                                                       fetch(urlStatus)
+        ]);
+
+        if (!resInfo.ok || !resStatus.ok) {
+            console.error("❌ [Lovélo] Erreur HTTP lors du fetch des fichiers GBFS.");
+            return;
+        }
+
+        const dataInfo = await resInfo.json();
+        const dataStatus = await resStatus.json();
+
+        console.log("🚲 [Lovélo] Données reçues avec succès :", dataInfo.data.stations.length, "stations trouvées.");
+
+        // Nettoyage des anciens marqueurs
+        marqueursVelos.forEach(m => m.remove());
+        marqueursVelos = [];
+
+        if (dataInfo.data && dataInfo.data.stations && dataStatus.data && dataStatus.data.stations) {
+
+            const statutStations = {};
+            dataStatus.data.stations.forEach(status => {
+                statutStations[status.station_id] = status;
+            });
+
+            let stationsAjoutees = 0;
+
+            dataInfo.data.stations.forEach(station => {
+                const lat = station.lat;
+                const lon = station.lon;
+                const nom = station.name;
+                const status = statutStations[station.station_id];
+
+                // On assouplit la condition pour s'assurer qu'on affiche un maximum de stations
+                if (lat && lon) {
+                    const velosDispos = status ? (status.num_bikes_available || 0) : 0;
+                    const placesVides = status ? (status.num_docks_available || 0) : 0;
+
+                    const el = document.createElement('div');
+                    el.className = 'velo-icon';
+
+                    if (velosDispos > 0) {
+                        el.innerHTML = '🚲';
+                        el.style.cssText = `font-size: 20px; cursor: pointer; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4));`;
+                    } else {
+                        el.innerHTML = '🚳';
+                        el.style.cssText = `font-size: 16px; cursor: pointer; opacity: 0.6;`;
+                    }
+
+                    const popupInfo = `
+                    <div style="font-family: 'Inter', sans-serif;">
+                    <b style="color: #0f172a; font-size: 14px;">${nom}</b><br>
+                    <div style="margin-top: 5px; font-size: 13px;">
+                    <span style="color: ${velosDispos > 0 ? '#10b981' : '#ef4444'}; font-weight: bold;">🚲 ${velosDispos} vélos</span> dispos<br>
+                    <span style="color: #64748b;">🅿️ ${placesVides} places</span> libres
+                    </div>
+                    </div>`;
+
+                    const popup = new maplibregl.Popup({ offset: 25 }).setHTML(popupInfo);
+
+                    const marker = new maplibregl.Marker({ element: el })
+                    .setLngLat([lon, lat])
+                    .setPopup(popup)
+                    .addTo(map);
+
+                    marqueursVelos.push(marker);
+                    stationsAjoutees++;
+                }
+            });
+
+            console.log(`✅ [Lovélo] ${stationsAjoutees} marqueurs affichés sur la carte !`);
+        } else {
+            console.warn("⚠️ [Lovélo] Structure JSON inattendue :", dataInfo, dataStatus);
+        }
+    } catch (e) {
+        console.error("❌ [Lovélo] Erreur critique dans le bloc catch :", e);
+    }
 }
 
 // === DESSINATEUR D'ITINÉRAIRE (RÉPARÉ POUR LES RUES) ===

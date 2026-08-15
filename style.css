@@ -11,6 +11,12 @@ body, html {
     width: 100vw;
 }
 
+.velo-icon {
+    font-size: 22px;
+    cursor: pointer;
+    text-shadow: 0px 2px 4px rgba(0,0,0,0.5);
+}
+
 /* === LE PANNEAU LATÉRAL === */
 .sidebar {
     width: 320px;
